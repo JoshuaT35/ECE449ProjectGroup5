@@ -149,47 +149,6 @@ class AbhroController(KesslerController):
         self.mine_control.addrule(rule3)
 
 
-    """
-    def ship_thrust_fuzzy_system(self):
-        
-        #Defines the fuzzy logic system for controlling the ship's thrust.
-        
-        # Input: Distance to the nearest asteroid
-        distance_to_asteroid = ctrl.Antecedent(np.arange(0, 300, 1), "distance_to_asteroid")
-        distance_to_asteroid["close"] = fuzz.zmf(distance_to_asteroid.universe, 0, 100)
-        distance_to_asteroid["medium"] = fuzz.trimf(distance_to_asteroid.universe, [50, 150, 250])
-        distance_to_asteroid["far"] = fuzz.smf(distance_to_asteroid.universe, 200, 300)
-
-        # Input: Number of nearby asteroids
-        nearby_asteroids = ctrl.Antecedent(np.arange(0, 11, 1), "nearby_asteroids")
-        nearby_asteroids["low"] = fuzz.zmf(nearby_asteroids.universe, 0, 3)
-        nearby_asteroids["medium"] = fuzz.trimf(nearby_asteroids.universe, [2, 5, 8])
-        nearby_asteroids["high"] = fuzz.smf(nearby_asteroids.universe, 7, 10)
-
-        # Input: Angle to the closest asteroid
-        angle_to_asteroid = ctrl.Antecedent(np.arange(-math.pi, math.pi, 0.1), "angle_to_asteroid")
-        angle_to_asteroid["aligned"] = fuzz.trimf(angle_to_asteroid.universe, [-math.pi / 4, 0, math.pi / 4])
-        angle_to_asteroid["off_angle"] = fuzz.trimf(angle_to_asteroid.universe, [-math.pi, -math.pi / 2, -math.pi / 4])
-        angle_to_asteroid["opposite"] = fuzz.trimf(angle_to_asteroid.universe, [-math.pi, 0, math.pi])
-
-        # Output: Thrust magnitude
-        thrust = ctrl.Consequent(np.arange(0, 1.1, 0.1), "thrust")
-        thrust["none"] = fuzz.zmf(thrust.universe, 0, 0.3)
-        thrust["low"] = fuzz.trimf(thrust.universe, [0.2, 0.4, 0.6])
-        thrust["medium"] = fuzz.trimf(thrust.universe, [0.5, 0.7, 0.9])
-        thrust["high"] = fuzz.smf(thrust.universe, 0.8, 1.0)
-
-        # Define fuzzy rules
-        rule1 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["high"], thrust["high"])
-        rule2 = ctrl.Rule(distance_to_asteroid["close"] & angle_to_asteroid["opposite"], thrust["high"])
-        rule3 = ctrl.Rule(distance_to_asteroid["far"] & nearby_asteroids["low"], thrust["none"])
-        rule4 = ctrl.Rule(distance_to_asteroid["medium"] & nearby_asteroids["medium"], thrust["medium"])
-        rule5 = ctrl.Rule(distance_to_asteroid["medium"] & angle_to_asteroid["off_angle"], thrust["low"])
-
-        # Attach rules to the control system
-        self.thrust_control = ctrl.ControlSystem([rule1, rule2, rule3, rule4, rule5])
-        #self.thrust_sim = ctrl.ControlSystemSimulation(self.thrust_control, flush_after_run=1)
-    """
     def ship_thrust_fuzzy_system(self):
         # Inputs: Distance to asteroid and nearby asteroids
         distance_to_asteroid = ctrl.Antecedent(np.arange(0, 300, 1), "distance_to_asteroid")
