@@ -1,9 +1,20 @@
 """
-Building off Joshua's controller, to incorporate logic for thrust, as well as genetic algorithm optimization later
+ADD A PROPER DESCRIPTION LATER
+
+
+
+
+-------
+
+we need to also credit Scott Dick's work, as he stated in the email
+-----
+
+
+
 """
 
 from immutabledict import immutabledict
-from kesslergame import KesslerController # In Eclipse, the name of the library is kesslergame, not src.kesslergame
+from kesslergame import KesslerController 
 from typing import Dict, Tuple, Any, Type
 from cmath import sqrt
 import skfuzzy as fuzz
@@ -11,8 +22,6 @@ from skfuzzy import control as ctrl
 import math
 import numpy as np
 import matplotlib as plt
-
-# for now, let's create a controller which fires at the closest target
 
 
 class TeamController(KesslerController):
@@ -72,9 +81,6 @@ class TeamController(KesslerController):
         rule_turn4 = ctrl.Rule(theta_delta['positive_small'], ship_turn['slight_right'])
         rule_turn5 = ctrl.Rule(theta_delta['positive_large'], ship_turn['moderate_right'])
 
-        # Fuzzy rules for ship_fire (firing requires alignment and proximity)
-        # Fuzzy rules for ship_fire (firing should occur frequently with alignment considerations)
-
         # High-priority firing when alignment and bullet time are ideal
         rule_fire1 = ctrl.Rule(theta_delta['zero'] & bullet_time['short'], ship_fire['fire'])
         rule_fire2 = ctrl.Rule(theta_delta['zero'] & bullet_time['medium'], ship_fire['fire'])
@@ -97,8 +103,6 @@ class TeamController(KesslerController):
 
         # Allow firing for any medium or short bullet time, unless explicitly suppressed
         rule_fire9 = ctrl.Rule((bullet_time['short'] | bullet_time['medium']) & ~theta_delta['positive_large'] & ~theta_delta['negative_large'], ship_fire['fire'])
-
-
 
         # Create the fuzzy control system
         self.targeting_control = ctrl.ControlSystem([
