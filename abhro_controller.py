@@ -150,9 +150,10 @@ class AbhroController(KesslerController):
 
 
     def ship_thrust_fuzzy_system(self):
-        # Inputs: Distance to asteroid and nearby asteroids
+        # Inputs: Distance to asteroid, nearby asteroids, and theta_delta
         distance_to_asteroid = ctrl.Antecedent(np.arange(0, 300, 1), "distance_to_asteroid")
         nearby_asteroids = ctrl.Antecedent(np.arange(0, 81, 1), "nearby_asteroids")
+        theta_delta = ctrl.Antecedent(np.arange(-180, 181, 1), "theta_delta")  # Angle in degrees
         thrust = ctrl.Consequent(np.arange(0, 151, 1), "thrust")  # Thrust universe 0–150
 
         # Membership functions for distance_to_asteroid
@@ -165,27 +166,45 @@ class AbhroController(KesslerController):
         nearby_asteroids["medium"] = fuzz.trimf(nearby_asteroids.universe, [15, 30, 50])
         nearby_asteroids["high"] = fuzz.trimf(nearby_asteroids.universe, [40, 60, 80])
 
+        # Membership functions for theta_delta (angle alignment)
+        theta_delta["small"] = fuzz.trimf(theta_delta.universe, [-20, 0, 20])  # Head-on or slightly misaligned
+        theta_delta["medium"] = fuzz.trimf(theta_delta.universe, [-60, 0, 60])  # Moderate misalignment
+        theta_delta["large"] = fuzz.trimf(theta_delta.universe, [-180, -90, 90])  # Safely aligned away
+
         # Membership functions for thrust (universe 0–150, with emergency thrust above 100)
+        thrust["very_low"] = fuzz.trimf(thrust.universe, [0, 0, 50])
         thrust["low"] = fuzz.trimf(thrust.universe, [0, 50, 100])
         thrust["medium"] = fuzz.trimf(thrust.universe, [50, 100, 125])
         thrust["high"] = fuzz.trimf(thrust.universe, [100, 150, 150])
 
-        # Rules for normal behavior
-        rule1 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["high"], thrust["high"])
-        rule2 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["medium"], thrust["medium"])
-        rule3 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["low"], thrust["low"])
+        # Rules for normal behavior (adjust thrust based on distance and crowding)
+        rule1 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["high"] & theta_delta["large"], thrust["high"])
+        rule2 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["medium"] & theta_delta["large"], thrust["medium"])
+        rule3 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["low"] & theta_delta["large"], thrust["low"])
 
-        rule4 = ctrl.Rule(distance_to_asteroid["medium"] & nearby_asteroids["high"], thrust["medium"])
-        rule5 = ctrl.Rule(distance_to_asteroid["medium"] & nearby_asteroids["medium"], thrust["low"])
-        rule6 = ctrl.Rule(distance_to_asteroid["medium"] & nearby_asteroids["low"], thrust["low"])
+        rule4 = ctrl.Rule(distance_to_asteroid["medium"] & nearby_asteroids["high"] & theta_delta["medium"], thrust["medium"])
+        rule5 = ctrl.Rule(distance_to_asteroid["medium"] & nearby_asteroids["medium"] & theta_delta["medium"], thrust["low"])
+        rule6 = ctrl.Rule(distance_to_asteroid["medium"] & nearby_asteroids["low"] & theta_delta["medium"], thrust["very_low"])
 
         rule7 = ctrl.Rule(distance_to_asteroid["far"] & nearby_asteroids["high"], thrust["low"])
-        rule8 = ctrl.Rule(distance_to_asteroid["far"] & nearby_asteroids["medium"], thrust["low"])
-        rule9 = ctrl.Rule(distance_to_asteroid["far"] & nearby_asteroids["low"], thrust["low"])
+        rule8 = ctrl.Rule(distance_to_asteroid["far"] & nearby_asteroids["medium"], thrust["very_low"])
+        rule9 = ctrl.Rule(distance_to_asteroid["far"] & nearby_asteroids["low"], thrust["very_low"])
 
+        # Rules for angle alignment
+        rule10 = ctrl.Rule(theta_delta["small"], thrust["very_low"])  # Head-on: suppress thrust
+        rule11 = ctrl.Rule(theta_delta["medium"] & nearby_asteroids["low"], thrust["low"])  # Moderate misalignment
+        rule12 = ctrl.Rule(theta_delta["large"] & distance_to_asteroid["medium"], thrust["medium"])  # Safely aligned
 
         # Control system
-        self.thrust_control = ctrl.ControlSystem([rule1, rule2, rule3, rule4, rule5, rule6, rule7, rule8, rule9])
+        self.thrust_control = ctrl.ControlSystem(
+            [
+                rule1, rule2, rule3,
+                rule4, rule5, rule6,
+                rule7, rule8, rule9,
+                rule10, rule11, rule12
+            ]
+        )
+
 
 
     # return the number of asteroids within the given distance
@@ -351,38 +370,34 @@ class AbhroController(KesslerController):
         # else:
         #     drop_mine = True
                 
-
-        
-        # implementation for thrust
-        # implementation for thrust
+ 
+    # Step 4: Closest Asteroid and Thrust System
         closest_asteroid, distance_to_asteroid = self.find_closest_asteroid(ship_state, game_state)
         num_nearby_asteroids = self.get_num_nearby_asteroids(ship_state, game_state, distance=500)
-        print(f"DEBUG - closest asteroid distance: {distance_to_asteroid}")
-        print(f"DEBUG - number of nearby asteroids: {num_nearby_asteroids}")
 
-        # New simulation instance for each step
+        # Debug logs for observation
+        print(f"DEBUG - Closest asteroid distance: {distance_to_asteroid}")
+        print(f"DEBUG - Nearby asteroids count: {num_nearby_asteroids}")
+        print(f"DEBUG - Theta Delta: {shooting_theta}")
+
+        # Thrust system simulation
         thrust_sim = ctrl.ControlSystemSimulation(self.thrust_control)
 
-        # Set inputs
+        # Pass inputs to thrust system
         thrust_sim.input["distance_to_asteroid"] = distance_to_asteroid
         thrust_sim.input["nearby_asteroids"] = num_nearby_asteroids
+        thrust_sim.input["theta_delta"] = shooting_theta  # Pass theta_delta for angle-aware thrust control
+
         # Compute thrust
         try:
             thrust_sim.compute()
             thrust = thrust_sim.output["thrust"]
-            print(f"computed thrust value: {thrust}")
+            print(f"DEBUG - Computed Thrust: {thrust}")
         except KeyError:
             print("KeyError: 'thrust' not computed. Check inputs or rules.")
             thrust = 0.0
 
-
-
         drop_mine = False
-
-        if shooting.output['ship_fire'] >= 0:
-            fire = True
-        else:
-            fire = False
         
         self.eval_frames +=1
         
