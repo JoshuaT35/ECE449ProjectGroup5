@@ -1,3 +1,7 @@
+"""
+Building off Joshua's controller, to incorporate logic for thrust, as well as genetic algorithm optimization later
+"""
+
 from immutabledict import immutabledict
 from kesslergame import KesslerController # In Eclipse, the name of the library is kesslergame, not src.kesslergame
 from typing import Dict, Tuple, Any, Type
@@ -11,12 +15,14 @@ import matplotlib as plt
 # for now, let's create a controller which fires at the closest target
 
 
-class JoshuaController(KesslerController):
+class AbhroController(KesslerController):
     def __init__(self):
+        super().__init__()  
         self.eval_frames = 0
-
-        # create fuzzy systems
         self.ship_targeting_fuzzy_system()
+        self.ship_mine_fuzzy_system()
+        self.ship_thrust_fuzzy_system()
+
 
 
     def ship_targeting_fuzzy_system(self):
@@ -100,6 +106,34 @@ class JoshuaController(KesslerController):
             rule_fire1, rule_fire2, rule_fire3, rule_fire4, rule_fire5, rule_fire6, rule_fire7, rule_fire8, rule_fire9  # Firing rules
         ])
 
+    
+    def ship_mine_fuzzy_system(self):
+        """
+        handles whether the ship should put a mine down or not
+        """
+        # if there are many asteroids nearby, put down a mine
+        nearby_asteroids = ctrl.Antecedent(np.linspace(0, 8, 1), "nearby_asteroids")
+        place_mine = ctrl.Consequent(np.linspace(-1, 1, 10), "place_mine")
+        
+        # Membership functions for nearby_asteroids
+        nearby_asteroids["low"] = fuzz.trimf(nearby_asteroids.universe, [0, 0, 2])
+        nearby_asteroids["medium"] = fuzz.trimf(nearby_asteroids.universe, [2, 3, 4])
+        nearby_asteroids["high"] = fuzz.trimf(nearby_asteroids.universe, [4, 7, 7])
+
+        # Membership functions for place_mine (binary: -1 = no mine, 1 = place mine)
+        place_mine["no_mine"] = fuzz.trimf(place_mine.universe, [-1, -1, 0.0])
+        place_mine["mine_now"] = fuzz.trimf(place_mine.universe, [0, 1, 1])
+
+        # Define fuzzy rules
+        rule1 = ctrl.Rule(nearby_asteroids["low"], place_mine["no_mine"])
+        rule2 = ctrl.Rule(nearby_asteroids["medium"], place_mine["mine_now"])
+        rule3 = ctrl.Rule(nearby_asteroids["high"], place_mine["mine_now"])
+
+        self.mine_control = ctrl.ControlSystem()
+        self.mine_control.addrule(rule1)
+        self.mine_control.addrule(rule2)
+        self.mine_control.addrule(rule3)
+
 
     def ship_thrust_fuzzy_system(self):
         # Inputs: Distance to asteroid, nearby asteroids, and theta_delta
@@ -164,14 +198,15 @@ class JoshuaController(KesslerController):
         ])
 
 
-    # return list of nearby asteroids within given distance int
-    def get_nearby_asteroids(self, ship_state: Dict, game_state: Dict, distance: int):
+
+
+    # return the number of asteroids within the given distance
+    def get_num_nearby_asteroids(self, ship_state: Dict, game_state: Dict, distance: int):
         # x and y coordinates of ship
         ship_pos_x = ship_state["position"][0]
         ship_pos_y = ship_state["position"][1]
 
         # default values
-        list_asteroids = []
         num_asteroids = 0
 
         # loop through asteroids
@@ -187,16 +222,15 @@ class JoshuaController(KesslerController):
             # c = curr_dist
             curr_dist = math.sqrt((ship_pos_x - asteroid_pos_x)**2 + (ship_pos_y - asteroid_pos_y)**2)
 
-            # if current distance is in given distance, increase number by 1 and add asteroid to list
+            # if current distance is in given distance, increase number by 1
             if (curr_dist <= distance):
-                list_asteroids.append(asteroid)
                 num_asteroids += 1
         
-        return list_asteroids
+        return num_asteroids
 
 
     # return asteroid and its distance if it exists, otherwise None and -1
-    def get_closest_asteroid(self, ship_state: Dict, game_state: Dict):
+    def find_closest_asteroid(self, ship_state: Dict, game_state: Dict):
         # x and y coordinates of ship
         ship_pos_x = ship_state["position"][0]
         ship_pos_y = ship_state["position"][1]
@@ -306,9 +340,10 @@ class JoshuaController(KesslerController):
         return bullet_t, shooting_theta
 
 
+
     # what does the ship do every time
     def actions(self, ship_state: Dict, game_state: Dict) -> Tuple[float, float, bool, bool]:
-        # get bullet_t and shooting_theta inputs for ship_targeting_fuzzy_system
+        # get bullet_t and shooting_theta inputs for ship_targeting_fuzzy_system, as well as distance to asteroid
         bullet_t, shooting_theta = self.get_bullet_t_shooting_theta(ship_state, game_state)
         closest_asteroid, distance_to_asteroid = self.find_closest_asteroid(ship_state, game_state)
         
@@ -320,14 +355,29 @@ class JoshuaController(KesslerController):
         shooting.input['distance_to_asteroid'] = distance_to_asteroid
         shooting.compute()
 
+        # Get the defuzzified outputs for ship_targeting_fuzzy_system
         turn_rate = shooting.output['ship_turn']
-
+        
         if shooting.output['ship_fire'] >= 0:
             fire = True
         else:
             fire = False
 
+        # get number of nearby asteroids within set distance
+        distance = 120
+        num_nearby_asteroids = self.get_num_nearby_asteroids(ship_state, game_state, distance)
+        mine_control_sim = ctrl.ControlSystemSimulation(self.mine_control, flush_after_run=1)
+        mine_control_sim.input["nearby_asteroids"] = num_nearby_asteroids
 
+        mine_control_sim.compute()
+        print(mine_control_sim.output["place_mine"])
+
+        # if mine_control_sim.output["place_mine"] == -1:
+        #     drop_mine = False
+        # else:
+        #     drop_mine = True
+                
+ 
         # Thrust System
         num_nearby_asteroids = self.get_num_nearby_asteroids(ship_state, game_state, distance=500)
 
@@ -353,17 +403,16 @@ class JoshuaController(KesslerController):
             print("KeyError: 'thrust' not computed. Check inputs or rules.")
             thrust = 0.0
 
-
         drop_mine = False
-
         
         self.eval_frames +=1
-
+        
+        #DEBUG
         print(f"thrust: {thrust}, turn_rate: {turn_rate}, fire: {fire}")
         
         return thrust, turn_rate, fire, drop_mine
-    
+
 
     @property
     def name(self) -> str:
-        return "Team 5 Controller"
+        return "Abhro Controller"
