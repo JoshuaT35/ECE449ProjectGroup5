@@ -150,39 +150,42 @@ class AbhroController(KesslerController):
 
 
     def ship_thrust_fuzzy_system(self):
-        # Inputs
+        # Inputs: Distance to asteroid and nearby asteroids
         distance_to_asteroid = ctrl.Antecedent(np.arange(0, 300, 1), "distance_to_asteroid")
         nearby_asteroids = ctrl.Antecedent(np.arange(0, 81, 1), "nearby_asteroids")
-        thrust = ctrl.Consequent(np.arange(0, 150, 1), "thrust")  # Expanded for emergency thrust
+        thrust = ctrl.Consequent(np.arange(0, 151, 1), "thrust")  # Thrust universe 0–150
 
-        # Membership functions
-        distance_to_asteroid["very_close"] = fuzz.trimf(distance_to_asteroid.universe, [0, 25, 50])
-        distance_to_asteroid["close"] = fuzz.trimf(distance_to_asteroid.universe, [25, 50, 100])
-        distance_to_asteroid["sweet_spot"] = fuzz.trimf(distance_to_asteroid.universe, [75, 150, 200])
-        distance_to_asteroid["far"] = fuzz.trimf(distance_to_asteroid.universe, [150, 300, 300])
+        # Membership functions for distance_to_asteroid
+        distance_to_asteroid["close"] = fuzz.trimf(distance_to_asteroid.universe, [0, 50, 100])
+        distance_to_asteroid["medium"] = fuzz.trimf(distance_to_asteroid.universe, [50, 150, 250])
+        distance_to_asteroid["far"] = fuzz.trimf(distance_to_asteroid.universe, [200, 300, 300])
 
+        # Membership functions for nearby_asteroids (universe 0–80)
         nearby_asteroids["low"] = fuzz.trimf(nearby_asteroids.universe, [0, 10, 20])
         nearby_asteroids["medium"] = fuzz.trimf(nearby_asteroids.universe, [15, 30, 50])
         nearby_asteroids["high"] = fuzz.trimf(nearby_asteroids.universe, [40, 60, 80])
 
-        thrust["stop"] = fuzz.trimf(thrust.universe, [0, 0, 20])
-        thrust["low"] = fuzz.trimf(thrust.universe, [20, 50, 80])
-        thrust["medium"] = fuzz.trimf(thrust.universe, [70, 100, 125])
-        thrust["high"] = fuzz.trimf(thrust.universe, [100, 125, 150])
-        thrust["emergency"] = fuzz.trimf(thrust.universe, [125, 150, 150])
+        # Membership functions for thrust (universe 0–150, with emergency thrust above 100)
+        thrust["low"] = fuzz.trimf(thrust.universe, [0, 50, 100])
+        thrust["medium"] = fuzz.trimf(thrust.universe, [50, 100, 125])
+        thrust["high"] = fuzz.trimf(thrust.universe, [100, 150, 150])
 
-        # Rules
-        # Normal targeting and thrust
-        rule1 = ctrl.Rule(distance_to_asteroid["sweet_spot"] & nearby_asteroids["low"], thrust["medium"])
-        rule2 = ctrl.Rule(distance_to_asteroid["sweet_spot"] & nearby_asteroids["medium"], thrust["low"])
-        rule3 = ctrl.Rule(distance_to_asteroid["sweet_spot"] & nearby_asteroids["high"], thrust["low"])
-        rule4 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["low"], thrust["low"])
-        rule5 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["medium"], thrust["stop"])
+        # Rules for normal behavior
+        rule1 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["high"], thrust["high"])
+        rule2 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["medium"], thrust["medium"])
+        rule3 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["low"], thrust["low"])
 
-        # Emergency thrust rules for cornered scenarios
-        rule6 = ctrl.Rule(nearby_asteroids["high"], thrust["emergency"])
+        rule4 = ctrl.Rule(distance_to_asteroid["medium"] & nearby_asteroids["high"], thrust["medium"])
+        rule5 = ctrl.Rule(distance_to_asteroid["medium"] & nearby_asteroids["medium"], thrust["low"])
+        rule6 = ctrl.Rule(distance_to_asteroid["medium"] & nearby_asteroids["low"], thrust["low"])
 
-        self.thrust_control = ctrl.ControlSystem([rule1, rule2, rule3, rule4, rule5, rule6])
+        rule7 = ctrl.Rule(distance_to_asteroid["far"] & nearby_asteroids["high"], thrust["low"])
+        rule8 = ctrl.Rule(distance_to_asteroid["far"] & nearby_asteroids["medium"], thrust["low"])
+        rule9 = ctrl.Rule(distance_to_asteroid["far"] & nearby_asteroids["low"], thrust["low"])
+
+
+        # Control system
+        self.thrust_control = ctrl.ControlSystem([rule1, rule2, rule3, rule4, rule5, rule6, rule7, rule8, rule9])
 
 
     # return the number of asteroids within the given distance
@@ -352,20 +355,15 @@ class AbhroController(KesslerController):
         
         # implementation for thrust
         # implementation for thrust
-        # Closest asteroid logic
         closest_asteroid, distance_to_asteroid = self.find_closest_asteroid(ship_state, game_state)
-        num_nearby_asteroids = self.get_num_nearby_asteroids(ship_state, game_state, distance=120)
-
-        # Handle cornering
-        if num_nearby_asteroids > 10:  # Adjust threshold for "cornered" state
-            print("Emergency escape triggered!")
-            return 150, 180, False, False  # High thrust, turn away, don't fire or mine
-
+        num_nearby_asteroids = self.get_num_nearby_asteroids(ship_state, game_state, distance=500)
         print(f"DEBUG - closest asteroid distance: {distance_to_asteroid}")
         print(f"DEBUG - number of nearby asteroids: {num_nearby_asteroids}")
 
         # New simulation instance for each step
         thrust_sim = ctrl.ControlSystemSimulation(self.thrust_control)
+
+        # Set inputs
         thrust_sim.input["distance_to_asteroid"] = distance_to_asteroid
         thrust_sim.input["nearby_asteroids"] = num_nearby_asteroids
         # Compute thrust
@@ -376,6 +374,7 @@ class AbhroController(KesslerController):
         except KeyError:
             print("KeyError: 'thrust' not computed. Check inputs or rules.")
             thrust = 0.0
+
 
 
         drop_mine = False
