@@ -26,99 +26,58 @@ class AbhroController(KesslerController):
 
 
     def ship_targeting_fuzzy_system(self):
-        self.eval_frames = 0 #What is this?
+        # Initialize eval frames
+        self.eval_frames = 0
 
-        # self.targeting_control is the targeting rulebase, which is static in this controller.      
-        # Declare variables
-        bullet_time = ctrl.Antecedent(np.arange(0,1.0,0.002), 'bullet_time')
-        theta_delta = ctrl.Antecedent(np.arange(-1*math.pi/30,math.pi/30,0.1), 'theta_delta') # Radians due to Python
-        ship_turn = ctrl.Consequent(np.arange(-180,180,1), 'ship_turn') # Degrees due to Kessler
-        ship_fire = ctrl.Consequent(np.arange(-1,1,0.1), 'ship_fire')
-        
-        #Declare fuzzy sets for bullet_time (how long it takes for the bullet to reach the intercept point)
-        bullet_time['S'] = fuzz.trimf(bullet_time.universe,[0,0,0.05])
-        bullet_time['M'] = fuzz.trimf(bullet_time.universe, [0,0.05,0.1])
-        bullet_time['L'] = fuzz.smf(bullet_time.universe,0.0,0.1)
-        
-        # Declare fuzzy sets for theta_delta (degrees of turn needed to reach the calculated firing angle)
-        # Hard-coded for a game step of 1/30 seconds
-        theta_delta['NL'] = fuzz.zmf(theta_delta.universe, -1*math.pi/30,-2*math.pi/90)
-        theta_delta['NM'] = fuzz.trimf(theta_delta.universe, [-1*math.pi/30, -2*math.pi/90, -1*math.pi/90])
-        theta_delta['NS'] = fuzz.trimf(theta_delta.universe, [-2*math.pi/90,-1*math.pi/90,math.pi/90])
-        # theta_delta['Z'] = fuzz.trimf(theta_delta.universe, [-1*math.pi/90,0,math.pi/90])
-        theta_delta['PS'] = fuzz.trimf(theta_delta.universe, [-1*math.pi/90,math.pi/90,2*math.pi/90])
-        theta_delta['PM'] = fuzz.trimf(theta_delta.universe, [math.pi/90,2*math.pi/90, math.pi/30])
-        theta_delta['PL'] = fuzz.smf(theta_delta.universe,2*math.pi/90,math.pi/30)
-        
-        # Declare fuzzy sets for the ship_turn consequent; this will be returned as turn_rate.
-        # Hard-coded for a game step of 1/30 seconds
-        ship_turn['NL'] = fuzz.trimf(ship_turn.universe, [-180,-180,-120])
-        ship_turn['NM'] = fuzz.trimf(ship_turn.universe, [-180,-120,-60])
-        ship_turn['NS'] = fuzz.trimf(ship_turn.universe, [-120,-60,60])
-        # ship_turn['Z'] = fuzz.trimf(ship_turn.universe, [-60,0,60])
-        ship_turn['PS'] = fuzz.trimf(ship_turn.universe, [-60,60,120])
-        ship_turn['PM'] = fuzz.trimf(ship_turn.universe, [60,120,180])
-        ship_turn['PL'] = fuzz.trimf(ship_turn.universe, [120,180,180])
-        
-        #Declare singleton fuzzy sets for the ship_fire consequent; -1 -> don't fire, +1 -> fire; this will be  thresholded
-        #   and returned as the boolean 'fire'
-        ship_fire['N'] = fuzz.trimf(ship_fire.universe, [-1,-1,0.0])
-        ship_fire['Y'] = fuzz.trimf(ship_fire.universe, [0.0,1,1]) 
-                
-        #Declare each fuzzy rule
-        rule1 = ctrl.Rule(bullet_time['L'] & theta_delta['NL'], (ship_turn['NL'], ship_fire['N']))
-        rule2 = ctrl.Rule(bullet_time['L'] & theta_delta['NM'], (ship_turn['NM'], ship_fire['N']))
-        rule3 = ctrl.Rule(bullet_time['L'] & theta_delta['NS'], (ship_turn['NS'], ship_fire['Y']))
-        # rule4 = ctrl.Rule(bullet_time['L'] & theta_delta['Z'], (ship_turn['Z'], ship_fire['Y']))
-        rule5 = ctrl.Rule(bullet_time['L'] & theta_delta['PS'], (ship_turn['PS'], ship_fire['Y']))
-        rule6 = ctrl.Rule(bullet_time['L'] & theta_delta['PM'], (ship_turn['PM'], ship_fire['N']))
-        rule7 = ctrl.Rule(bullet_time['L'] & theta_delta['PL'], (ship_turn['PL'], ship_fire['N']))
-        rule8 = ctrl.Rule(bullet_time['M'] & theta_delta['NL'], (ship_turn['NL'], ship_fire['N']))
-        rule9 = ctrl.Rule(bullet_time['M'] & theta_delta['NM'], (ship_turn['NM'], ship_fire['N']))
-        rule10 = ctrl.Rule(bullet_time['M'] & theta_delta['NS'], (ship_turn['NS'], ship_fire['Y']))
-        # rule11 = ctrl.Rule(bullet_time['M'] & theta_delta['Z'], (ship_turn['Z'], ship_fire['Y']))
-        rule12 = ctrl.Rule(bullet_time['M'] & theta_delta['PS'], (ship_turn['PS'], ship_fire['Y']))
-        rule13 = ctrl.Rule(bullet_time['M'] & theta_delta['PM'], (ship_turn['PM'], ship_fire['N']))
-        rule14 = ctrl.Rule(bullet_time['M'] & theta_delta['PL'], (ship_turn['PL'], ship_fire['N']))
-        rule15 = ctrl.Rule(bullet_time['S'] & theta_delta['NL'], (ship_turn['NL'], ship_fire['Y']))
-        rule16 = ctrl.Rule(bullet_time['S'] & theta_delta['NM'], (ship_turn['NM'], ship_fire['Y']))
-        rule17 = ctrl.Rule(bullet_time['S'] & theta_delta['NS'], (ship_turn['NS'], ship_fire['Y']))
-        # rule18 = ctrl.Rule(bullet_time['S'] & theta_delta['Z'], (ship_turn['Z'], ship_fire['Y']))
-        rule19 = ctrl.Rule(bullet_time['S'] & theta_delta['PS'], (ship_turn['PS'], ship_fire['Y']))
-        rule20 = ctrl.Rule(bullet_time['S'] & theta_delta['PM'], (ship_turn['PM'], ship_fire['Y']))
-        rule21 = ctrl.Rule(bullet_time['S'] & theta_delta['PL'], (ship_turn['PL'], ship_fire['Y']))
+        # Declare fuzzy variables
+        bullet_time = ctrl.Antecedent(np.arange(0, 1.0, 0.002), 'bullet_time')  # Time for bullet to reach intercept
+        theta_delta = ctrl.Antecedent(np.arange(-1 * math.pi / 30, math.pi / 30, 0.1), 'theta_delta')  # Angle to adjust (radians)
+        ship_turn = ctrl.Consequent(np.arange(-180, 180, 1), 'ship_turn')  # Turn rate (degrees)
+        ship_fire = ctrl.Consequent(np.arange(-1, 1, 0.1), 'ship_fire')  # Fire decision
 
-        #DEBUG
-        #bullet_time.view()
-        #theta_delta.view()
-        #ship_turn.view()
-        #ship_fire.view()
+        # Membership functions for bullet_time
+        bullet_time['short'] = fuzz.trimf(bullet_time.universe, [0, 0, 0.05])
+        bullet_time['medium'] = fuzz.trimf(bullet_time.universe, [0, 0.05, 0.1])
+        bullet_time['long'] = fuzz.smf(bullet_time.universe, 0.1, 0.2)
 
-        # Declare the fuzzy controller, add the rules 
-        # This is an instance variable, and thus available for other methods in the same object. See notes.                         
-        # self.targeting_control = ctrl.ControlSystem([rule1, rule2, rule3, rule4, rule5, rule6, rule7, rule8, rule9, rule10, rule11, rule12, rule13, rule14, rule15])
-        self.targeting_control = ctrl.ControlSystem()
-        self.targeting_control.addrule(rule1)
-        self.targeting_control.addrule(rule2)
-        self.targeting_control.addrule(rule3)
-        # self.targeting_control.addrule(rule4)
-        self.targeting_control.addrule(rule5)
-        self.targeting_control.addrule(rule6)
-        self.targeting_control.addrule(rule7)
-        self.targeting_control.addrule(rule8)
-        self.targeting_control.addrule(rule9)
-        self.targeting_control.addrule(rule10)
-        # self.targeting_control.addrule(rule11)
-        self.targeting_control.addrule(rule12)
-        self.targeting_control.addrule(rule13)
-        self.targeting_control.addrule(rule14)
-        self.targeting_control.addrule(rule15)
-        self.targeting_control.addrule(rule16)
-        self.targeting_control.addrule(rule17)
-        # self.targeting_control.addrule(rule18)
-        self.targeting_control.addrule(rule19)
-        self.targeting_control.addrule(rule20)
-        self.targeting_control.addrule(rule21)
+        # Membership functions for theta_delta (turn adjustment needed)
+        theta_delta['negative_large'] = fuzz.zmf(theta_delta.universe, -math.pi / 30, -math.pi / 60)
+        theta_delta['negative_small'] = fuzz.trimf(theta_delta.universe, [-math.pi / 60, -math.pi / 90, 0])
+        theta_delta['zero'] = fuzz.trimf(theta_delta.universe, [-math.pi / 90, 0, math.pi / 90])
+        theta_delta['positive_small'] = fuzz.trimf(theta_delta.universe, [0, math.pi / 90, math.pi / 60])
+        theta_delta['positive_large'] = fuzz.smf(theta_delta.universe, math.pi / 60, math.pi / 30)
+
+        # Membership functions for ship_turn
+        ship_turn['sharp_left'] = fuzz.trimf(ship_turn.universe, [-180, -180, -90])
+        ship_turn['moderate_left'] = fuzz.trimf(ship_turn.universe, [-180, -90, -45])
+        ship_turn['slight_left'] = fuzz.trimf(ship_turn.universe, [-90, -45, 0])
+        ship_turn['slight_right'] = fuzz.trimf(ship_turn.universe, [0, 45, 90])
+        ship_turn['moderate_right'] = fuzz.trimf(ship_turn.universe, [45, 90, 180])
+        ship_turn['sharp_right'] = fuzz.trimf(ship_turn.universe, [90, 180, 180])
+
+        # Membership functions for ship_fire
+        ship_fire['no_fire'] = fuzz.trimf(ship_fire.universe, [-1, -1, 0])
+        ship_fire['fire'] = fuzz.trimf(ship_fire.universe, [0, 1, 1])
+
+        # Fuzzy rules for ship_turn (independent of firing)
+        rule_turn1 = ctrl.Rule(theta_delta['negative_large'], ship_turn['sharp_left'])
+        rule_turn2 = ctrl.Rule(theta_delta['negative_small'], ship_turn['moderate_left'])
+        rule_turn3 = ctrl.Rule(theta_delta['zero'], ship_turn['slight_left'])
+        rule_turn4 = ctrl.Rule(theta_delta['positive_small'], ship_turn['slight_right'])
+        rule_turn5 = ctrl.Rule(theta_delta['positive_large'], ship_turn['moderate_right'])
+
+        # Fuzzy rules for ship_fire (firing requires alignment and proximity)
+        rule_fire1 = ctrl.Rule(theta_delta['zero'] & bullet_time['short'], ship_fire['fire'])
+        rule_fire2 = ctrl.Rule(theta_delta['positive_small'] & bullet_time['medium'], ship_fire['fire'])
+        rule_fire3 = ctrl.Rule(theta_delta['negative_small'] & bullet_time['medium'], ship_fire['fire'])
+        rule_fire4 = ctrl.Rule(bullet_time['long'] | theta_delta['positive_large'] | theta_delta['negative_large'], ship_fire['no_fire'])  # Suppress firing when conditions are poor
+
+
+        # Create the fuzzy control system
+        self.targeting_control = ctrl.ControlSystem([
+            rule_turn1, rule_turn2, rule_turn3, rule_turn4, rule_turn5,  # Turning rules
+            rule_fire1, rule_fire2, rule_fire3, rule_fire4  # Firing rules
+        ])
 
     
     def ship_mine_fuzzy_system(self):
