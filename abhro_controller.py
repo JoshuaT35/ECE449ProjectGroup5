@@ -168,7 +168,7 @@ class AbhroController(KesslerController):
         # Updated rules for thrust
 
         # Negative thrust to move away from high asteroid density
-        rule1 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["high"] & theta_delta["misaligned"], thrust["negative_low"])
+        rule1 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["high"] & theta_delta["misaligned"], thrust["negative_high"])
         rule2 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["medium"] & theta_delta["misaligned"], thrust["negative_low"])
 
         # New rule: Slow down in close proximity even when aligned
