@@ -137,59 +137,66 @@ class AbhroController(KesslerController):
 
     def ship_thrust_fuzzy_system(self):
         # Inputs: Distance to asteroid, nearby asteroids, and theta_delta
-        distance_to_asteroid = ctrl.Antecedent(np.arange(0, 300, 1), "distance_to_asteroid")
-        nearby_asteroids = ctrl.Antecedent(np.arange(0, 81, 1), "nearby_asteroids")
+        distance_to_asteroid = ctrl.Antecedent(np.arange(0, 1001, 1), "distance_to_asteroid")  # Expanded range
+        nearby_asteroids = ctrl.Antecedent(np.arange(0, 101, 1), "nearby_asteroids")  # Expanded range
         theta_delta = ctrl.Antecedent(np.arange(-180, 181, 1), "theta_delta")  # Angle in degrees
-        thrust = ctrl.Consequent(np.arange(0, 151, 1), "thrust")  # Thrust universe 0–150
+        thrust = ctrl.Consequent(np.arange(-200, 201, 1), "thrust")  # Thrust universe [-200, 200]
 
         # Membership functions for distance_to_asteroid
-        distance_to_asteroid["close"] = fuzz.trimf(distance_to_asteroid.universe, [0, 50, 100])
-        distance_to_asteroid["medium"] = fuzz.trimf(distance_to_asteroid.universe, [50, 150, 250])
-        distance_to_asteroid["far"] = fuzz.trimf(distance_to_asteroid.universe, [200, 300, 300])
+        distance_to_asteroid["close"] = fuzz.trimf(distance_to_asteroid.universe, [0, 0, 150])
+        distance_to_asteroid["medium"] = fuzz.trimf(distance_to_asteroid.universe, [50, 100, 150])
+        distance_to_asteroid["far"] = fuzz.trimf(distance_to_asteroid.universe, [100, 1000, 1000])
 
-        # Membership functions for nearby_asteroids (universe 0–80)
-        nearby_asteroids["low"] = fuzz.trimf(nearby_asteroids.universe, [0, 10, 20])
-        nearby_asteroids["medium"] = fuzz.trimf(nearby_asteroids.universe, [15, 30, 50])
-        nearby_asteroids["high"] = fuzz.trimf(nearby_asteroids.universe, [40, 60, 80])
+        # Membership functions for nearby_asteroids (universe 0–100)
+        nearby_asteroids["low"] = fuzz.trimf(nearby_asteroids.universe, [0, 10, 30])
+        nearby_asteroids["medium"] = fuzz.trimf(nearby_asteroids.universe, [20, 50, 80])
+        nearby_asteroids["high"] = fuzz.trimf(nearby_asteroids.universe, [70, 100, 100])
 
         # Membership functions for theta_delta (angle alignment)
-        theta_delta["small"] = fuzz.trimf(theta_delta.universe, [-20, 0, 20])  # Head-on or slightly misaligned
-        theta_delta["medium"] = fuzz.trimf(theta_delta.universe, [-60, 0, 60])  # Moderate misalignment
-        theta_delta["large"] = fuzz.trimf(theta_delta.universe, [-180, -90, 90])  # Safely aligned away
+        theta_delta["aligned"] = fuzz.trimf(theta_delta.universe, [-20, 0, 20])  # Head-on or slightly misaligned
+        theta_delta["moderate"] = fuzz.trimf(theta_delta.universe, [-60, 0, 60])  # Moderate misalignment
+        theta_delta["misaligned"] = fuzz.trimf(theta_delta.universe, [-180, -90, 90])  # Strong misalignment
 
-        # Membership functions for thrust (universe 0–150, with emergency thrust above 100)
-        thrust["very_low"] = fuzz.trimf(thrust.universe, [0, 0, 50])
-        thrust["low"] = fuzz.trimf(thrust.universe, [0, 50, 100])
-        thrust["medium"] = fuzz.trimf(thrust.universe, [50, 100, 125])
-        thrust["high"] = fuzz.trimf(thrust.universe, [100, 150, 150])
+        # Membership functions for thrust [-200 to 200]
+        thrust["negative_high"] = fuzz.trimf(thrust.universe, [-200, -200, -100])  # Strong reverse
+        thrust["negative_low"] = fuzz.trimf(thrust.universe, [-100, -50, 0])  # Slow reverse
+        thrust["very_low"] = fuzz.trimf(thrust.universe, [-10, 0, 50])  # Gentle forward/reverse
+        thrust["low"] = fuzz.trimf(thrust.universe, [0, 50, 100])  # Regular forward
+        thrust["medium"] = fuzz.trimf(thrust.universe, [50, 100, 150])  # Moderate forward
+        thrust["high"] = fuzz.trimf(thrust.universe, [100, 150, 200])  # Maximum forward
 
-        # Rules for normal behavior (adjust thrust based on distance and crowding)
-        rule1 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["high"] & theta_delta["large"], thrust["high"])
-        rule2 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["medium"] & theta_delta["large"], thrust["medium"])
-        rule3 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["low"] & theta_delta["large"], thrust["very_low"])
+        # Updated rules for thrust
 
-        rule4 = ctrl.Rule(distance_to_asteroid["medium"] & nearby_asteroids["high"] & theta_delta["medium"], thrust["medium"])
-        rule5 = ctrl.Rule(distance_to_asteroid["medium"] & nearby_asteroids["medium"] & theta_delta["medium"], thrust["low"])
-        rule6 = ctrl.Rule(distance_to_asteroid["medium"] & nearby_asteroids["low"] & theta_delta["medium"], thrust["high"])
+        # Negative thrust to move away from high asteroid density
+        rule1 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["high"] & theta_delta["misaligned"], thrust["negative_high"])
+        rule2 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["medium"] & theta_delta["misaligned"], thrust["negative_low"])
 
-        rule7 = ctrl.Rule(distance_to_asteroid["far"] & nearby_asteroids["high"], thrust["low"])
-        rule8 = ctrl.Rule(distance_to_asteroid["far"] & nearby_asteroids["medium"], thrust["very_low"])
-        rule9 = ctrl.Rule(distance_to_asteroid["far"] & nearby_asteroids["low"], thrust["high"])
+        # New rule: Slow down in close proximity even when aligned
+        rule3 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["medium"] & theta_delta["aligned"], thrust["negative_low"])
+        rule4 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["low"] & theta_delta["aligned"], thrust["very_low"])
 
-        # Rules for angle alignment
-        rule10 = ctrl.Rule(theta_delta["small"], thrust["very_low"])  # Head-on: suppress thrust
-        rule11 = ctrl.Rule(theta_delta["medium"] & nearby_asteroids["low"], thrust["low"])  # Moderate misalignment
-        rule12 = ctrl.Rule(theta_delta["large"] & distance_to_asteroid["medium"], thrust["medium"])  # Safely aligned
+        # Gradual reverse thrust to escape tight corners
+        rule5 = ctrl.Rule(distance_to_asteroid["medium"] & nearby_asteroids["high"] & theta_delta["moderate"], thrust["negative_low"])
+        rule6 = ctrl.Rule(distance_to_asteroid["medium"] & nearby_asteroids["medium"] & theta_delta["aligned"], thrust["low"])
+
+        # Moderate thrust for medium proximity and alignment
+        rule7 = ctrl.Rule(distance_to_asteroid["medium"] & nearby_asteroids["low"] & theta_delta["aligned"], thrust["medium"])
+
+        # High thrust to close in on distant asteroids in low-density areas
+        rule8 = ctrl.Rule(distance_to_asteroid["far"] & nearby_asteroids["low"] & theta_delta["aligned"], thrust["high"])
+        rule9 = ctrl.Rule(distance_to_asteroid["far"] & nearby_asteroids["medium"] & theta_delta["aligned"], thrust["medium"])
+
+        # Suppress thrust if head-on and no escape required
+        rule10 = ctrl.Rule(theta_delta["aligned"] & distance_to_asteroid["close"], thrust["very_low"])
+
+        # Escaping large misalignment zones with controlled thrust
+        rule11 = ctrl.Rule(theta_delta["misaligned"] & distance_to_asteroid["medium"], thrust["low"])
 
         # Control system
-        self.thrust_control = ctrl.ControlSystem(
-            [
-                rule1, rule2, rule3,
-                rule4, rule5, rule6,
-                rule7, rule8, rule9,
-                rule10, rule11, rule12
-            ]
-        )
+        self.thrust_control = ctrl.ControlSystem([
+            rule1, rule2, rule3, rule4, rule5, rule6, rule7, rule8, rule9, rule10, rule11
+        ])
+
 
 
 
