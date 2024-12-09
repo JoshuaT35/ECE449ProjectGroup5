@@ -73,18 +73,37 @@ class AbhroController(KesslerController):
         rule_turn5 = ctrl.Rule(theta_delta['positive_large'], ship_turn['moderate_right'])
 
         # Fuzzy rules for ship_fire (firing requires alignment and proximity)
+        # Fuzzy rules for ship_fire (firing should occur frequently with alignment considerations)
+
+        # High-priority firing when alignment and bullet time are ideal
         rule_fire1 = ctrl.Rule(theta_delta['zero'] & bullet_time['short'], ship_fire['fire'])
         rule_fire2 = ctrl.Rule(theta_delta['zero'] & bullet_time['medium'], ship_fire['fire'])
-        rule_fire3 = ctrl.Rule(bullet_time['long'] | theta_delta['positive_large'] | theta_delta['negative_large'], ship_fire['no_fire'])  # Suppress firing when conditions are poor
-        rule_fire4 = ctrl.Rule(distance_to_asteroid['close'], ship_fire['fire'])
-        rule_fire5 = ctrl.Rule(distance_to_asteroid['medium'], ship_fire['fire'])
-        rule_fire6 = ctrl.Rule(distance_to_asteroid['far'], ship_fire['no_fire'] )
+
+        # Allow firing for minor misalignments if proximity is good
+        rule_fire3 = ctrl.Rule((theta_delta['positive_small'] | theta_delta['negative_small']) & bullet_time['short'], ship_fire['fire'])
+        rule_fire4 = ctrl.Rule((theta_delta['positive_small'] | theta_delta['negative_small']) & bullet_time['medium'], ship_fire['fire'])
+
+        # Encourage firing at close targets regardless of alignment
+        rule_fire5 = ctrl.Rule(distance_to_asteroid['close'], ship_fire['fire'])
+
+        # Allow firing at medium-range targets if alignment is reasonable
+        rule_fire6 = ctrl.Rule(distance_to_asteroid['medium'] & (theta_delta['zero'] | theta_delta['positive_small'] | theta_delta['negative_small']), ship_fire['fire'])
+
+        # Fire at far targets if alignment and timing are good
+        rule_fire7 = ctrl.Rule(distance_to_asteroid['far'] & theta_delta['zero'] & (bullet_time['short'] | bullet_time['medium']), ship_fire['fire'])
+
+        # Suppress firing for poor conditions
+        rule_fire8 = ctrl.Rule((bullet_time['long'] & (theta_delta['positive_large'] | theta_delta['negative_large'])) | (distance_to_asteroid['far'] & (theta_delta['positive_large'] | theta_delta['negative_large'])), ship_fire['no_fire'])
+
+        # Allow firing for any medium or short bullet time, unless explicitly suppressed
+        rule_fire9 = ctrl.Rule((bullet_time['short'] | bullet_time['medium']) & ~theta_delta['positive_large'] & ~theta_delta['negative_large'], ship_fire['fire'])
+
 
 
         # Create the fuzzy control system
         self.targeting_control = ctrl.ControlSystem([
             rule_turn1, rule_turn2, rule_turn3, rule_turn4, rule_turn5,  # Turning rules
-            rule_fire1, rule_fire2, rule_fire3, rule_fire4, rule_fire5, rule_fire6  # Firing rules
+            rule_fire1, rule_fire2, rule_fire3, rule_fire4, rule_fire5, rule_fire6, rule_fire7, rule_fire8, rule_fire9  # Firing rules
         ])
 
     
@@ -247,60 +266,72 @@ class AbhroController(KesslerController):
 
     # get bullet_t and shooting_theta for ship_targeting_fuzzy_system
     def get_bullet_t_shooting_theta(self, ship_state: Dict, game_state: Dict):
-        # get the closest asteroid
+        # Get the closest asteroid
         closest_asteroid, closest_asteroid_dist = self.find_closest_asteroid(ship_state, game_state)
 
-        # x and y coordinates of ship
+        # Extract x and y coordinates of the ship
         ship_pos_x = ship_state["position"][0]
         ship_pos_y = ship_state["position"][1]
 
-        # closest asteroid distance
+        # Calculate the relative position between the ship and the asteroid
+        asteroid_ship_x = closest_asteroid["position"][0] - ship_pos_x
+        asteroid_ship_y = closest_asteroid["position"][1] - ship_pos_y
 
-        asteroid_ship_x = ship_pos_x - closest_asteroid["position"][0]
-        asteroid_ship_y = ship_pos_y - closest_asteroid["position"][1]
-        
-        asteroid_ship_theta = math.atan2(asteroid_ship_y,asteroid_ship_x)
-        
-        asteroid_direction = math.atan2(closest_asteroid["velocity"][1], closest_asteroid["velocity"][0]) # Velocity is a 2-element array [vx,vy].
-        my_theta2 = asteroid_ship_theta - asteroid_direction
-        cos_my_theta2 = math.cos(my_theta2)
-        # Need the speeds of the asteroid and bullet. speed * time is distance to the intercept point
-        asteroid_vel = math.sqrt(closest_asteroid["velocity"][0]**2 + closest_asteroid["velocity"][1]**2)
-        bullet_speed = 800 # Hard-coded bullet speed from bullet.py
-        
-        # Determinant of the quadratic formula b^2-4ac
-        targ_det = (-2 * closest_asteroid_dist * asteroid_vel * cos_my_theta2)**2 - (4*(asteroid_vel**2 - bullet_speed**2) * closest_asteroid_dist)
-        
-        # Combine the Law of Cosines with the quadratic formula for solve for intercept time. Remember, there are two values produced.
-        intrcpt1 = ((2 * closest_asteroid_dist * asteroid_vel * cos_my_theta2) + math.sqrt(targ_det)) / (2 * (asteroid_vel**2 -bullet_speed**2))
-        intrcpt2 = ((2 * closest_asteroid_dist * asteroid_vel * cos_my_theta2) - math.sqrt(targ_det)) / (2 * (asteroid_vel**2-bullet_speed**2))
-        
-        # Take the smaller intercept time, as long as it is positive; if not, take the larger one.
-        if intrcpt1 > intrcpt2:
-            if intrcpt2 >= 0:
-                bullet_t = intrcpt2
-            else:
-                bullet_t = intrcpt1
+        # Angle from the ship to the asteroid
+        asteroid_ship_theta = math.atan2(asteroid_ship_y, asteroid_ship_x)
+
+        # Asteroid velocity components
+        asteroid_velocity_x = closest_asteroid["velocity"][0]
+        asteroid_velocity_y = closest_asteroid["velocity"][1]
+        asteroid_velocity_magnitude = math.sqrt(asteroid_velocity_x**2 + asteroid_velocity_y**2)
+
+        # Asteroid direction (angle of velocity vector)
+        asteroid_direction = math.atan2(asteroid_velocity_y, asteroid_velocity_x)
+
+        # Bullet speed (fixed for the game)
+        bullet_speed = 800  # m/s
+
+        # Solve for intercept using relative motion
+        relative_angle = asteroid_ship_theta - asteroid_direction
+        cos_relative_angle = math.cos(relative_angle)
+
+        # Determinant of the quadratic equation (b^2 - 4ac)
+        a = asteroid_velocity_magnitude**2 - bullet_speed**2
+        b = -2 * closest_asteroid_dist * asteroid_velocity_magnitude * cos_relative_angle
+        c = closest_asteroid_dist**2
+        discriminant = b**2 - 4 * a * c
+
+        # Handle edge cases where no valid solution exists
+        if discriminant < 0:
+            # No solution, aim directly at the asteroid's current position
+            bullet_t = 0
+            intercept_x = closest_asteroid["position"][0]
+            intercept_y = closest_asteroid["position"][1]
         else:
-            if intrcpt1 >= 0:
-                bullet_t = intrcpt1
-            else:
-                bullet_t = intrcpt2
-                
-        # Calculate the intercept point. The work backwards to find the ship's firing angle my_theta1.
-        # Velocities are in m/sec, so bullet_t is in seconds. Add one tik, hardcoded to 1/30 sec.
-        intrcpt_x = closest_asteroid["position"][0] + closest_asteroid["velocity"][0] * (bullet_t+1/30)
-        intrcpt_y = closest_asteroid["position"][1] + closest_asteroid["velocity"][1] * (bullet_t+1/30)
+            # Compute both roots of the quadratic equation
+            sqrt_discriminant = math.sqrt(discriminant)
+            t1 = (-b + sqrt_discriminant) / (2 * a)
+            t2 = (-b - sqrt_discriminant) / (2 * a)
 
-        my_theta1 = math.atan2((intrcpt_y - ship_pos_y),(intrcpt_x - ship_pos_x))
-        
-        # Lastly, find the difference betwwen firing angle and the ship's current orientation. BUT THE SHIP HEADING IS IN DEGREES.
-        shooting_theta = my_theta1 - ((math.pi/180)*ship_state["heading"])
-        
-        # Wrap all angles to (-pi, pi)
+            # Choose the smaller positive time
+            bullet_t = min(t for t in [t1, t2] if t >= 0)
+
+            # Predict the intercept position of the asteroid
+            intercept_x = closest_asteroid["position"][0] + asteroid_velocity_x * bullet_t
+            intercept_y = closest_asteroid["position"][1] + asteroid_velocity_y * bullet_t
+
+        # Calculate the firing angle needed to hit the intercept position
+        firing_angle = math.atan2(intercept_y - ship_pos_y, intercept_x - ship_pos_x)
+
+        # Calculate the angular difference (theta_delta) between the ship's heading and the firing angle
+        ship_heading_rad = math.radians(ship_state["heading"])
+        shooting_theta = firing_angle - ship_heading_rad
+
+        # Wrap the angle to the range (-pi, pi)
         shooting_theta = (shooting_theta + math.pi) % (2 * math.pi) - math.pi
 
         return bullet_t, shooting_theta
+
 
 
     # what does the ship do every time
