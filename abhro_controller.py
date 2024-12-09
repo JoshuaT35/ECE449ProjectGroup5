@@ -34,6 +34,12 @@ class AbhroController(KesslerController):
         theta_delta = ctrl.Antecedent(np.arange(-1 * math.pi / 30, math.pi / 30, 0.1), 'theta_delta')  # Angle to adjust (radians)
         ship_turn = ctrl.Consequent(np.arange(-180, 180, 1), 'ship_turn')  # Turn rate (degrees)
         ship_fire = ctrl.Consequent(np.arange(-1, 1, 0.1), 'ship_fire')  # Fire decision
+        distance_to_asteroid = ctrl.Antecedent(np.arange(0, 300, 1), "distance_to_asteroid")
+
+        # Membership functions for distance_to_asteroid
+        distance_to_asteroid["close"] = fuzz.trimf(distance_to_asteroid.universe, [0, 50, 100])
+        distance_to_asteroid["medium"] = fuzz.trimf(distance_to_asteroid.universe, [50, 150, 250])
+        distance_to_asteroid["far"] = fuzz.trimf(distance_to_asteroid.universe, [200, 300, 300])
 
         # Membership functions for bullet_time
         bullet_time['short'] = fuzz.trimf(bullet_time.universe, [0, 0, 0.05])
@@ -68,15 +74,17 @@ class AbhroController(KesslerController):
 
         # Fuzzy rules for ship_fire (firing requires alignment and proximity)
         rule_fire1 = ctrl.Rule(theta_delta['zero'] & bullet_time['short'], ship_fire['fire'])
-        rule_fire2 = ctrl.Rule(theta_delta['positive_small'] & bullet_time['medium'], ship_fire['fire'])
-        rule_fire3 = ctrl.Rule(theta_delta['negative_small'] & bullet_time['medium'], ship_fire['fire'])
-        rule_fire4 = ctrl.Rule(bullet_time['long'] | theta_delta['positive_large'] | theta_delta['negative_large'], ship_fire['no_fire'])  # Suppress firing when conditions are poor
+        rule_fire2 = ctrl.Rule(theta_delta['zero'] & bullet_time['medium'], ship_fire['fire'])
+        rule_fire3 = ctrl.Rule(bullet_time['long'] | theta_delta['positive_large'] | theta_delta['negative_large'], ship_fire['no_fire'])  # Suppress firing when conditions are poor
+        rule_fire4 = ctrl.Rule(distance_to_asteroid['close'], ship_fire['fire'])
+        rule_fire5 = ctrl.Rule(distance_to_asteroid['medium'], ship_fire['fire'])
+        rule_fire6 = ctrl.Rule(distance_to_asteroid['far'], ship_fire['no_fire'] )
 
 
         # Create the fuzzy control system
         self.targeting_control = ctrl.ControlSystem([
             rule_turn1, rule_turn2, rule_turn3, rule_turn4, rule_turn5,  # Turning rules
-            rule_fire1, rule_fire2, rule_fire3, rule_fire4  # Firing rules
+            rule_fire1, rule_fire2, rule_fire3, rule_fire4, rule_fire5, rule_fire6  # Firing rules
         ])
 
     
@@ -139,15 +147,15 @@ class AbhroController(KesslerController):
         # Rules for normal behavior (adjust thrust based on distance and crowding)
         rule1 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["high"] & theta_delta["large"], thrust["high"])
         rule2 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["medium"] & theta_delta["large"], thrust["medium"])
-        rule3 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["low"] & theta_delta["large"], thrust["low"])
+        rule3 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["low"] & theta_delta["large"], thrust["very_low"])
 
         rule4 = ctrl.Rule(distance_to_asteroid["medium"] & nearby_asteroids["high"] & theta_delta["medium"], thrust["medium"])
         rule5 = ctrl.Rule(distance_to_asteroid["medium"] & nearby_asteroids["medium"] & theta_delta["medium"], thrust["low"])
-        rule6 = ctrl.Rule(distance_to_asteroid["medium"] & nearby_asteroids["low"] & theta_delta["medium"], thrust["very_low"])
+        rule6 = ctrl.Rule(distance_to_asteroid["medium"] & nearby_asteroids["low"] & theta_delta["medium"], thrust["high"])
 
         rule7 = ctrl.Rule(distance_to_asteroid["far"] & nearby_asteroids["high"], thrust["low"])
         rule8 = ctrl.Rule(distance_to_asteroid["far"] & nearby_asteroids["medium"], thrust["very_low"])
-        rule9 = ctrl.Rule(distance_to_asteroid["far"] & nearby_asteroids["low"], thrust["very_low"])
+        rule9 = ctrl.Rule(distance_to_asteroid["far"] & nearby_asteroids["low"], thrust["high"])
 
         # Rules for angle alignment
         rule10 = ctrl.Rule(theta_delta["small"], thrust["very_low"])  # Head-on: suppress thrust
@@ -297,14 +305,16 @@ class AbhroController(KesslerController):
 
     # what does the ship do every time
     def actions(self, ship_state: Dict, game_state: Dict) -> Tuple[float, float, bool, bool]:
-        # get bullet_t and shooting_theta inputs for ship_targeting_fuzzy_system
+        # get bullet_t and shooting_theta inputs for ship_targeting_fuzzy_system, as well as distance to asteroid
         bullet_t, shooting_theta = self.get_bullet_t_shooting_theta(ship_state, game_state)
+        closest_asteroid, distance_to_asteroid = self.find_closest_asteroid(ship_state, game_state)
         
         # create control system simulation for ship_targeting_fuzzy_system
         # pass the inputs to the rulebase and fire it
         shooting = ctrl.ControlSystemSimulation(self.targeting_control, flush_after_run=1)
         shooting.input['bullet_time'] = bullet_t
         shooting.input['theta_delta'] = shooting_theta
+        shooting.input['distance_to_asteroid'] = distance_to_asteroid
         shooting.compute()
 
         # Get the defuzzified outputs for ship_targeting_fuzzy_system
@@ -330,8 +340,7 @@ class AbhroController(KesslerController):
         #     drop_mine = True
                 
  
-    # Step 4: Closest Asteroid and Thrust System
-        closest_asteroid, distance_to_asteroid = self.find_closest_asteroid(ship_state, game_state)
+        # Thrust System
         num_nearby_asteroids = self.get_num_nearby_asteroids(ship_state, game_state, distance=500)
 
         # Debug logs for observation
