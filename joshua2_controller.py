@@ -13,31 +13,37 @@ import matplotlib.pyplot as plt
 
 class Joshua2Controller(KesslerController):
     def __init__(self):
-        self.eval_frames = 0
+        self.eval_frames = 30
 
         # create fuzzy systems
         self.ship_mine_fuzzy_system()
 
-    
+        # variable for mine cooldown. When it is 0, can deploy a mine
+        # otherwise, the value is reset
+        self.mine_cooldown = 0
+
+    def reset_mine_cooldown(self):
+        self.mine_cooldown = 80
+
     def ship_mine_fuzzy_system(self):
         """
         handles whether the ship should put a mine down or not
         """
         # Antecedent: number of nearby asteroids
-        nearby_asteroids = ctrl.Antecedent(np.linspace(0, 7, 100), "nearby_asteroids")
+        nearby_asteroids = ctrl.Antecedent(np.linspace(0, 25, 100), "nearby_asteroids")
 
         # Antecedent: largest space between nearby asteroids (TO ADD)
 
         # Consequent: put down a mine or not
-        place_mine = ctrl.Consequent(np.linspace(-1, 1, 10), "place_mine")
+        place_mine = ctrl.Consequent(np.linspace(-1, 1, 5), "place_mine")
         
         # Membership functions for nearby_asteroids
-        nearby_asteroids["little"] = fuzz.trimf(nearby_asteroids.universe, [0, 0, 3])
-        nearby_asteroids["some"] = fuzz.trimf(nearby_asteroids.universe, [2, 3, 4])
-        nearby_asteroids["many"] = fuzz.trimf(nearby_asteroids.universe, [3, 7, 7])
+        nearby_asteroids["little"] = fuzz.trimf(nearby_asteroids.universe, [0, 0, 5])
+        nearby_asteroids["some"] = fuzz.trimf(nearby_asteroids.universe, [4, 7, 11])
+        nearby_asteroids["many"] = fuzz.trimf(nearby_asteroids.universe, [10, 25, 25])  # abitrarily high value
 
-        # Membership functions for place_mine (binary: -1 = no mine, 1 = place mine)
-        place_mine["no_mine"] = fuzz.trimf(place_mine.universe, [-1, -1, 0.0])
+        # Membership functions for place_mine (binary:  < 0 no mine, > 0 place mine)
+        place_mine["no_mine"] = fuzz.trimf(place_mine.universe, [-1, -1, 0])
         place_mine["mine_now"] = fuzz.trimf(place_mine.universe, [0, 1, 1])
 
         # Define fuzzy rules
@@ -50,7 +56,7 @@ class Joshua2Controller(KesslerController):
         # - should also take space into account
         rule2 = ctrl.Rule(nearby_asteroids["some"], place_mine["mine_now"])
 
-        # - if there are many asteroids, place a mind
+        # - if there are many asteroids, place a mine
         rule3 = ctrl.Rule(nearby_asteroids["many"], place_mine["mine_now"])
 
         # create the control system
@@ -206,16 +212,24 @@ class Joshua2Controller(KesslerController):
         # # put antecedent inputs
         mine_control_sim.input["nearby_asteroids"] = num_nearby_asteroids
 
-        # # compute
+        # compute simulation
         mine_control_sim.compute()
 
-        print(num_nearby_asteroids)
-        print(mine_control_sim.output["place_mine"])
+        print("nearby asteroid count: {}\n".format(num_nearby_asteroids))
+        print("mine CD: {}\n".format(self.mine_cooldown))
+        if (mine_control_sim.output["place_mine"] > 0):
+            print("wanna drop a mine\n")
 
-        if mine_control_sim.output["place_mine"] > 0:
-            drop_mine = False
-        else:
+        # if we need to place a mine, and we are not on cooldown, place a mine
+        if mine_control_sim.output["place_mine"] > 0 and self.mine_cooldown == 0:
             drop_mine = True
+            # reset cooldown
+            self.reset_mine_cooldown()
+        # decremenet cooldown by 1
+        else:
+            drop_mine = False
+            if (self.mine_cooldown > 0):
+                self.mine_cooldown -= 1
                
         # And return your three outputs to the game simulation. Controller algorithm complete.
         thrust = 0.0
@@ -223,9 +237,6 @@ class Joshua2Controller(KesslerController):
         fire = False
         
         self.eval_frames +=1
-        
-        #DEBUG
-        # print(thrust, bullet_t, shooting_theta, turn_rate, fire)
         
         return thrust, turn_rate, fire, drop_mine
     
@@ -236,101 +247,22 @@ class Joshua2Controller(KesslerController):
 
 
 if __name__ == "__main__":
-    nearby_asteroids = ctrl.Antecedent(np.linspace(0, 7, 100), "nearby_asteroids")
+    nearby_asteroids = ctrl.Antecedent(np.linspace(0, 25, 100), "nearby_asteroids")
 
     # Antecedent: largest space between nearby asteroids (TO ADD)
 
     # Consequent: put down a mine or not
-    place_mine = ctrl.Consequent(np.linspace(-1, 1, 10), "place_mine")
+    place_mine = ctrl.Consequent(np.linspace(-1, 1, 5), "place_mine")
     
     # Membership functions for nearby_asteroids
-    nearby_asteroids["little"] = fuzz.trimf(nearby_asteroids.universe, [0, 0, 3])
-    nearby_asteroids["some"] = fuzz.trimf(nearby_asteroids.universe, [2, 3, 4])
-    nearby_asteroids["many"] = fuzz.trimf(nearby_asteroids.universe, [3, 7, 7])
+    nearby_asteroids["little"] = fuzz.trimf(nearby_asteroids.universe, [0, 0, 5])
+    nearby_asteroids["some"] = fuzz.trimf(nearby_asteroids.universe, [4, 7, 11])
+    nearby_asteroids["many"] = fuzz.trimf(nearby_asteroids.universe, [10, 25, 25])  # abitrarily high value
 
     # Membership functions for place_mine (binary: -1 = no mine, 1 = place mine)
     place_mine["no_mine"] = fuzz.trimf(place_mine.universe, [-1, -1, 0.0])
     place_mine["mine_now"] = fuzz.trimf(place_mine.universe, [0, 1, 1])
 
-    place_mine.view()
+    nearby_asteroids.view()
 
     plt.show()
-
-# if __name__ == "__main__":
-# #     # if there are many asteroids nearby, put down a mine
-# #     nearby_asteroids = ctrl.Antecedent(np.linspace(0, 7, 8), "nearby_asteroids")
-# #     # place_mine = ctrl.Consequent(np.linspace(-1, 1, 10), "place_mine")
-    
-# #     # Membership functions for nearby_asteroids
-# #     nearby_asteroids["little"] = fuzz.trimf(nearby_asteroids.universe, [0, 0, 2])
-# #     nearby_asteroids["some"] = fuzz.trimf(nearby_asteroids.universe, [2, 3, 4])
-# #     nearby_asteroids["many"] = fuzz.trimf(nearby_asteroids.universe, [4, 7, 7])
-
-# #     nearby_asteroids.view()
-
-# #     plt.show()
-
-#     # test law of cosines implementation
-#     # d1 = 7.0
-#     # d2 = 15.0
-#     # d3 = 21.0
-
-#     # # angle
-#     # d1_square = math.pow(d1, 2)
-#     # d2_square = math.pow(d2, 2)
-#     # d3_square = math.pow(d3, 2)
-
-#     # # angle
-#     # # print((d1_square + d2_square - d3_square) / (2*d1*d2))
-#     # angle = math.acos((d1_square + d2_square - d3_square) / (2*d1*d2))
-#     # print(angle)
-#     # x and y coordinates of ship
-#     ship_pos_x = 4
-#     ship_pos_y = 4
-
-#     # x and y coordinates of asteroid1
-#     asteroid1_pos_x = 0
-#     asteroid1_pos_y = 0
-
-#     asteroid2_pos_x = 6
-#     asteroid2_pos_y = 2
-
-#     # get magnitude of distance squared and magnitude of distance from ship to first asteroid
-#     dx_ship_to_a1 = asteroid1_pos_x - ship_pos_x
-#     dy_ship_to_a1 = asteroid1_pos_y - ship_pos_y
-#     d_ship_to_a1_square = math.pow(dx_ship_to_a1, 2) + math.pow(dy_ship_to_a1, 2)
-#     d_ship_to_a1 = math.sqrt(d_ship_to_a1_square)
-
-#     # get magnitude of distance squared and magnitude of distance from ship to second asteroid
-#     dx_ship_to_a2 = asteroid2_pos_x - ship_pos_x
-#     dy_ship_to_a2 = asteroid2_pos_y - ship_pos_y
-#     d_ship_to_a2_square = math.pow(dx_ship_to_a2, 2) + math.pow(dy_ship_to_a2, 2)
-#     d_ship_to_a2 = math.sqrt(d_ship_to_a2_square)
-
-#     # get magnitude of distance squared between the 2 asteroids
-#     dx_a1_a2 = asteroid1_pos_x - asteroid2_pos_x
-#     dy_a1_a2 = asteroid1_pos_y - asteroid2_pos_y
-#     d_a1_to_a2_square = math.pow(dx_a1_a2, 2) + math.pow(dy_a1_a2, 2)
-
-#     # law of cosines to find theta (the absolution of values means we do not have direction)
-#     angle_theta_magnitude = math.acos(
-#         (d_ship_to_a1_square + d_ship_to_a2_square - d_a1_to_a2_square) / (2*d_ship_to_a1*d_ship_to_a2)
-#     )
-
-#     # get unit vector v1 (ship to asteroid 1)
-#     # unit_v1 = magnitude(dx_ship_a1.i + dy_ship_a1.j)/magnitude
-#     # print(dx_ship_to_a1/d_ship_to_a1)
-#     # print(dy_ship_to_a1/d_ship_to_a1)
-
-#     # get unit vector v2 (ship to asteroid 2)
-#     # unit_v2 = magnitude(dx_ship_a2.i + dy_ship_a2.j)/magnitude
-#     # print(dx_ship_to_a2/d_ship_to_a2)
-#     # print(dy_ship_to_a2/d_ship_to_a2)
-
-#     # get unit vector that lies between v1 and v2
-#     unit_v3_x = (dx_ship_to_a1/d_ship_to_a1) + (dx_ship_to_a2/d_ship_to_a2)
-#     unit_v3_y = (dx_ship_to_a2/d_ship_to_a2) + (dx_ship_to_a2/d_ship_to_a2)
-#     unit_v3 = tuple(unit_v3_x, unit_v3_y)
-
-#     return angle_theta_magnitude, unit_v3
-
