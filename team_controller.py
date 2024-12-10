@@ -322,6 +322,92 @@ class TeamController(KesslerController):
 
     def ship_escape_fuzzy_system(self):
         # Antecedent: theta_radians_between_asteriod
+        # Inputs: Distance to asteroid, nearby asteroids, and theta_delta
+        distance_to_mine = ctrl.Antecedent(np.arange(0, 1001, 1),"distance_to_mine") 
+        distance_to_asteroid = ctrl.Antecedent(np.arange(0, 1001, 1), "distance_to_asteroid")  # Expanded range
+        nearby_asteroids = ctrl.Antecedent(np.arange(0, 101, 1), "nearby_asteroids")  # Expanded range
+        theta_delta = ctrl.Antecedent(np.arange(-180, 181, 1), "theta_delta")  # Angle in degrees
+        thrust = ctrl.Consequent(np.arange(-200, 201, 1), "thrust")  # Thrust universe [-200, 200]
+
+        # Membership functions for distance_to_asteroid
+        distance_to_mine["dead"] = fuzz.trimf(distance_to_mine.universe, [0, 0, 200])
+        distance_to_mine["safe"] = fuzz.trimf(distance_to_mine.universe, [200, 250, 1000])
+
+
+        # Membership functions for distance_to_asteroid
+        distance_to_asteroid["close"] = fuzz.trimf(distance_to_asteroid.universe, [0, 0, 150])
+        distance_to_asteroid["medium"] = fuzz.trimf(distance_to_asteroid.universe, [50, 100, 150])
+        distance_to_asteroid["far"] = fuzz.trimf(distance_to_asteroid.universe, [100, 1000, 1000])
+
+        # Membership functions for nearby_asteroids (universe 0–100)
+        nearby_asteroids["low"] = fuzz.trimf(nearby_asteroids.universe, [0, 10, 30])
+        nearby_asteroids["medium"] = fuzz.trimf(nearby_asteroids.universe, [20, 50, 80])
+        nearby_asteroids["high"] = fuzz.trimf(nearby_asteroids.universe, [70, 100, 100])
+
+        # Membership functions for theta_delta (angle alignment)
+        theta_delta["aligned"] = fuzz.trimf(theta_delta.universe, [-20, 0, 20])  # Head-on or slightly misaligned
+        theta_delta["moderate"] = fuzz.trimf(theta_delta.universe, [-60, 0, 60])  # Moderate misalignment
+        theta_delta["misaligned"] = fuzz.trimf(theta_delta.universe, [-180, -90, 90])  # Strong misalignment
+
+        # Membership functions for thrust [-200 to 200]
+        thrust["negative_high"] = fuzz.trimf(thrust.universe, [-200, -200, -100])  # Strong reverse
+        thrust["negative_low"] = fuzz.trimf(thrust.universe, [-100, -50, 0])  # Slow reverse
+        thrust["very_low"] = fuzz.trimf(thrust.universe, [-10, 0, 50])  # Gentle forward/reverse
+        thrust["low"] = fuzz.trimf(thrust.universe, [0, 50, 100])  # Regular forward
+        thrust["medium"] = fuzz.trimf(thrust.universe, [50, 100, 150])  # Moderate forward
+        thrust["high"] = fuzz.trimf(thrust.universe, [100, 150, 200])  # Maximum forward
+
+        # Updated rules for thrust
+
+        # Negative thrust to move away from high asteroid density
+        rule1 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["high"] & theta_delta["misaligned"] & distance_to_mine["dead"], thrust["negative_high"])
+        rule2 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["medium"] & theta_delta["misaligned"] & distance_to_mine["safe"], thrust["negative_low"])
+
+        rule21 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["high"] & theta_delta["misaligned"] & distance_to_mine["safe"], thrust["negative_high"])
+        rule22 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["medium"] & theta_delta["misaligned"] & distance_to_mine["dead"], thrust["negative_high"])
+
+        # New rule: Slow down in close proximity even when aligned
+        rule3 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["medium"] & theta_delta["aligned"] & distance_to_mine["dead"], thrust["negative_high"])
+        rule4 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["low"] & theta_delta["aligned"] & distance_to_mine["safe"], thrust["very_low"])
+
+        rule23 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["medium"] & theta_delta["aligned"] & distance_to_mine["safe"], thrust["negative_low"])
+        rule24 = ctrl.Rule(distance_to_asteroid["close"] & nearby_asteroids["low"] & theta_delta["aligned"] & distance_to_mine["dead"], thrust["medium"])
+
+
+        # Gradual reverse thrust to escape tight corners
+        rule5 = ctrl.Rule(distance_to_asteroid["medium"] & nearby_asteroids["high"] & theta_delta["moderate"] & distance_to_mine["dead"], thrust["negative_high"])
+        rule6 = ctrl.Rule(distance_to_asteroid["medium"] & nearby_asteroids["medium"] & theta_delta["aligned"] & distance_to_mine["safe"], thrust["low"])
+
+        rule25 = ctrl.Rule(distance_to_asteroid["medium"] & nearby_asteroids["high"] & theta_delta["moderate"] & distance_to_mine["safe"], thrust["negative_low"])
+        rule26 = ctrl.Rule(distance_to_asteroid["medium"] & nearby_asteroids["medium"] & theta_delta["aligned"] & distance_to_mine["dead"], thrust["medium"])
+
+
+        # Moderate thrust for medium proximity and alignment
+        rule7 = ctrl.Rule(distance_to_asteroid["medium"] & nearby_asteroids["low"] & theta_delta["aligned"] & distance_to_mine["dead"], thrust["medium"])
+
+        rule27 = ctrl.Rule(distance_to_asteroid["medium"] & nearby_asteroids["low"] & theta_delta["aligned"] & distance_to_mine["safe"], thrust["medium"])
+
+        # High thrust to close in on distant asteroids in low-density areas
+        rule8 = ctrl.Rule(distance_to_asteroid["far"] & nearby_asteroids["low"] & theta_delta["aligned"] & distance_to_mine["dead"] , thrust["medium"])
+        rule9 = ctrl.Rule(distance_to_asteroid["far"] & nearby_asteroids["medium"] & theta_delta["aligned"] & distance_to_mine["safe"], thrust["medium"])
+
+        rule28 = ctrl.Rule(distance_to_asteroid["far"] & nearby_asteroids["low"] & theta_delta["aligned"] & distance_to_mine["safe"], thrust["medium"])
+        rule29 = ctrl.Rule(distance_to_asteroid["far"] & nearby_asteroids["medium"] & theta_delta["aligned"] & distance_to_mine["dead"] , thrust["medium"])
+
+        # Suppress thrust if head-on and no escape required
+        rule10 = ctrl.Rule(theta_delta["aligned"] & distance_to_asteroid["close"] & distance_to_mine["safe"], thrust["very_low"])
+        rule30 = ctrl.Rule(theta_delta["aligned"] & distance_to_asteroid["close"] & distance_to_mine["dead"], thrust["medium"])
+
+        # Escaping large misalignment zones with controlled thrust
+        rule11 = ctrl.Rule(theta_delta["misaligned"] & distance_to_asteroid["medium"] & distance_to_mine["safe"], thrust["low"])
+
+        rule31 = ctrl.Rule(theta_delta["misaligned"] & distance_to_asteroid["medium"] & distance_to_mine["dead"], thrust["medium"])
+
+        # Control system
+        self.escapethrust_control = ctrl.ControlSystem([
+            rule1, rule2, rule3, rule4, rule5, rule6, rule7, rule8, rule9, rule10, rule11,
+            rule21, rule22, rule23, rule24, rule25, rule26, rule27, rule28, rule29, rule30, rule31
+        ])
 
     def reset_mine_cooldown(self):
         self.mine_cooldown = 60
@@ -611,7 +697,7 @@ class TeamController(KesslerController):
         drop_mine = False
 
         # we fight
-        if perimeter_evaluation <= 1:
+        if perimeter_evaluation >= 0:
             # --- fight: fire or place a mine ---
 
             # if too many asteroids nearby (adjustable), and we are not on cooldown, place a mine
@@ -677,6 +763,24 @@ class TeamController(KesslerController):
             if (self.mine_cooldown > 0):
                 self.mine_cooldown -= 1
 
+
+            # --- use thrust system all the time ---
+            # Thrust system simulation
+            thrust_sim = ctrl.ControlSystemSimulation(self.thrust_control)
+
+            # Pass inputs to thrust system
+            thrust_sim.input["distance_to_asteroid"] = distance_to_asteroid
+            thrust_sim.input["nearby_asteroids"] = num_nearby_asteroids
+            thrust_sim.input["theta_delta"] = shooting_theta  # Pass theta_delta for angle-aware thrust control
+
+            # Compute thrust
+            try:
+                thrust_sim.compute()
+                thrust = thrust_sim.output["thrust"]
+                # print(f"DEBUG - Computed Thrust: {thrust}")
+            except:
+                # print("KeyError: 'thrust' not computed. Check inputs or rules.")
+                thrust = 0.0
             
 
 
