@@ -1,5 +1,9 @@
 """
-Building off Joshua's controller, to incorporate logic for thrust, as well as genetic algorithm optimization later
+
+This is the working fuzzy controller for Group 5. Worked on by: Abhro Chowdhury, Joshua Tablan, Alif Bin Khorshed Ahmed
+
+CREDIT: 
+For parts of this controller, we used logic supplied by Scott Dick, in his controller released to the class.
 """
 
 from immutabledict import immutabledict
@@ -13,14 +17,13 @@ import numpy as np
 import matplotlib as plt
 
 
-class AbhroController(KesslerController):
+class FinalController(KesslerController):
     def __init__(self):
         super().__init__()  
         self.eval_frames = 0
         self.ship_targeting_fuzzy_system()
         self.ship_mine_fuzzy_system()
         self.ship_thrust_fuzzy_system()
-
 
 
     def ship_targeting_fuzzy_system(self):
@@ -69,9 +72,6 @@ class AbhroController(KesslerController):
         rule_turn3 = ctrl.Rule(theta_delta['zero'], ship_turn['slight_left'])
         rule_turn4 = ctrl.Rule(theta_delta['positive_small'], ship_turn['slight_right'])
         rule_turn5 = ctrl.Rule(theta_delta['positive_large'], ship_turn['moderate_right'])
-
-        # Fuzzy rules for ship_fire (firing requires alignment and proximity)
-        # Fuzzy rules for ship_fire (firing should occur frequently with alignment considerations)
 
         # High-priority firing when alignment and bullet time are ideal
         rule_fire1 = ctrl.Rule(theta_delta['zero'] & bullet_time['short'], ship_fire['fire'])
@@ -214,10 +214,6 @@ class AbhroController(KesslerController):
             asteroid_pos_x = asteroid["position"][0]
             asteroid_pos_y = asteroid["position"][1]
 
-            # get distance between asteroid and ship
-            # a = ship_pos_x - asteroid_pos_x (doesn't matter if negative since we square)
-            # b = ship_pos_y - asteroid_pos_y (doesn't matter if negative since we square)
-            # c = curr_dist
             curr_dist = math.sqrt((ship_pos_x - asteroid_pos_x)**2 + (ship_pos_y - asteroid_pos_y)**2)
 
             # if current distance is in given distance, increase number by 1
@@ -245,10 +241,7 @@ class AbhroController(KesslerController):
             asteroid_pos_x = asteroid["position"][0]
             asteroid_pos_y = asteroid["position"][1]
 
-            # get distance between asteroid and ship
-            # a = ship_pos_x - asteroid_pos_x (doesn't matter if negative since we square)
-            # b = ship_pos_y - asteroid_pos_y (doesn't matter if negative since we square)
-            # c = curr_dist
+
             curr_dist = math.sqrt((ship_pos_x - asteroid_pos_x)**2 + (ship_pos_y - asteroid_pos_y)**2)
 
             # add to list
@@ -370,11 +363,6 @@ class AbhroController(KesslerController):
         mine_control_sim.compute()
         print(mine_control_sim.output["place_mine"])
 
-        # if mine_control_sim.output["place_mine"] == -1:
-        #     drop_mine = False
-        # else:
-        #     drop_mine = True
-                
  
         # Thrust System
         num_nearby_asteroids = self.get_num_nearby_asteroids(ship_state, game_state, distance=500)
@@ -413,4 +401,4 @@ class AbhroController(KesslerController):
 
     @property
     def name(self) -> str:
-        return "Abhro Controller"
+        return "Final Controller"

@@ -39,6 +39,11 @@ class TeamController(KesslerController):
         self.mine_cooldown = 70
         self.mine_pos = [-1, -1]
 
+        # - escape mode attributes
+        self.escape_mode = False        # Indicates whether the ship is in escape mode
+        self.escape_cooldown = 0        # Countdown frames for escape mode duration
+        self.escape_vector = (0, 0)     # Direction of escape thrust (unit vector)
+
         # --- fuzzy systems ---
         self.ship_perimeter_fuzzy_system()
         self.ship_targeting_fuzzy_system()
@@ -320,7 +325,7 @@ class TeamController(KesslerController):
         self.ship_perimeter_situation.addrule(rule8)
 
 
-    def ship_escape_fuzzy_system(self):
+   # def ship_escape_fuzzy_system(self):
         # Antecedent: theta_radians_between_asteriod
 
     def reset_mine_cooldown(self):
@@ -562,7 +567,7 @@ class TeamController(KesslerController):
 
         # --- take stock of perimeter ---
             # - check if nearby mine
-        mine_distance = self.update_mine_distance(ship_state, self.mine_pos[0], self.mine_pos[0])
+        mine_distance = self.update_mine_distance(ship_state, self.mine_pos[0], self.mine_pos[1])
 
             # - number of asteroids nearby
         list_nearby_asteroids, num_nearby_asteroids = self.get_nearby_asteroids(ship_state, game_state, distance=500)
@@ -600,9 +605,10 @@ class TeamController(KesslerController):
         # if error, just fight. what's the worst that could happen?
         perimeter_evaluation = 0
         try:
+            perimeter_simulation.compute()
             perimeter_evaluation = perimeter_simulation.output['movement']
         except:
-            perimeter_simulation = 0
+            perimeter_evaluation = 0  # Default to fight if simulation fails
 
         # variables to set
         thrust = 0.0
@@ -610,65 +616,56 @@ class TeamController(KesslerController):
         fire = False
         drop_mine = False
 
+        # --- Escape Logic ---
+        if self.escape_mode:
+            # Use escape vector for thrust and turn
+            thrust = 200  # Maximum thrust
+            turn_rate = math.degrees(math.atan2(self.escape_vector[1], self.escape_vector[0])) - ship_state["heading"]
+
+            # Cooldown management
+            self.escape_cooldown -= 1
+            if self.escape_cooldown <= 0:
+                self.escape_mode = False  # Exit escape mode
+            return thrust, turn_rate, fire, drop_mine
+
         # we fight
         if perimeter_evaluation <= 1:
             # --- fight: fire or place a mine ---
+            if num_nearby_asteroids >= 10 and self.mine_cooldown == 0:
+                print("DEBUG: Mine placement conditions met.")
+                print(f"DEBUG: num_nearby_asteroids={num_nearby_asteroids}, mine_cooldown={self.mine_cooldown}")
 
-            # if too many asteroids nearby (adjustable), and we are not on cooldown, place a mine
-            if (num_nearby_asteroids >= 10) and self.mine_cooldown == 0:
+                # Place a mine
                 drop_mine = True
-                # reset cooldown
                 self.reset_mine_cooldown()
-
-                # do not fire
+                self.mine_pos = ship_state["position"]  # Save mine position
                 fire = False
-                shooting_theta = 0
+                self.escape_mode = True
+                self.escape_cooldown = 50  # Escape for 50 frames
+                self.escape_vector = (-unit_v3[0], -unit_v3[1])  # Escape opposite the largest open space
+                return thrust, turn_rate, fire, drop_mine
 
-            else:
-                # decrement mine cooldown
-                drop_mine = False
-                if (self.mine_cooldown > 0):
-                    self.mine_cooldown -= 1
+            # Targeting logic
+            bullet_t, shooting_theta = self.get_bullet_t_shooting_theta(ship_state, game_state)
+            shooting = ctrl.ControlSystemSimulation(self.targeting_control, flush_after_run=1)
+            shooting.input['bullet_time'] = bullet_t
+            shooting.input['theta_delta'] = shooting_theta
+            shooting.input['distance_to_asteroid'] = distance_to_asteroid
+            shooting.compute()
 
-                # --- targeting fuzzy system ---
-            
-                # get bullet_t and shooting_theta inputs for ship_targeting_fuzzy_system, as well as distance to asteroid
-                bullet_t, shooting_theta = self.get_bullet_t_shooting_theta(ship_state, game_state)
+            turn_rate = shooting.output['ship_turn']
+            fire = shooting.output['ship_fire'] >= 0
 
-                # create control system simulation for ship_targeting_fuzzy_system
-                # pass the inputs to the rulebase and fire it
-                shooting = ctrl.ControlSystemSimulation(self.targeting_control, flush_after_run=1)
-                shooting.input['bullet_time'] = bullet_t
-                shooting.input['theta_delta'] = shooting_theta
-                shooting.input['distance_to_asteroid'] = distance_to_asteroid
-                shooting.compute()
-
-                # Get the defuzzified outputs for ship_targeting_fuzzy_system
-                turn_rate = shooting.output['ship_turn']
-
-                if shooting.output['ship_fire'] >= 0:
-                    fire = True
-                else:
-                    fire = False
-
-
-                # --- use thrust system all the time ---
-                # Thrust system simulation
-                thrust_sim = ctrl.ControlSystemSimulation(self.thrust_control)
-
-                # Pass inputs to thrust system
-                thrust_sim.input["distance_to_asteroid"] = distance_to_asteroid
-                thrust_sim.input["nearby_asteroids"] = num_nearby_asteroids
-                thrust_sim.input["theta_delta"] = shooting_theta  # Pass theta_delta for angle-aware thrust control
-
-                # Compute thrust
-                try:
-                    thrust_sim.compute()
-                    thrust = thrust_sim.output["thrust"]
-                    # print(f"DEBUG - Computed Thrust: {thrust}")
-                except:
-                    # print("KeyError: 'thrust' not computed. Check inputs or rules.")
-                    thrust = 0.0
+            # Thrust logic
+            thrust_sim = ctrl.ControlSystemSimulation(self.thrust_control)
+            thrust_sim.input["distance_to_asteroid"] = distance_to_asteroid
+            thrust_sim.input["nearby_asteroids"] = num_nearby_asteroids
+            thrust_sim.input["theta_delta"] = shooting_theta
+            try:
+                thrust_sim.compute()
+                thrust = thrust_sim.output["thrust"]
+            except:
+                thrust = 0.0
 
         # else we flee
         else:

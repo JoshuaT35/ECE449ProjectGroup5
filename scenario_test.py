@@ -7,7 +7,7 @@ import time
 
 from kesslergame import Scenario, KesslerGame, GraphicsType
 from test_controller import TestController
-from team_controller import TeamController
+from final_controller import FinalController
 from graphics_both import GraphicsBoth
 
 # Define game scenario
@@ -36,7 +36,7 @@ game = KesslerGame(settings=game_settings)  # Use this to visualize the game sce
 pre = time.perf_counter()
 score, perf_data = game.run(scenario=my_test_scenario, controllers=[
     TestController(),
-    TeamController()
+    FinalController()
     ])
 
 # Print out some general info about the result
