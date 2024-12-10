@@ -1,20 +1,9 @@
 """
-ADD A PROPER DESCRIPTION LATER
-
-
-
-
--------
-
-we need to also credit Scott Dick's work, as he stated in the email
------
-
-
-
+Building off Joshua's controller, to incorporate logic for thrust, as well as genetic algorithm optimization later
 """
 
 from immutabledict import immutabledict
-from kesslergame import KesslerController 
+from kesslergame import KesslerController # In Eclipse, the name of the library is kesslergame, not src.kesslergame
 from typing import Dict, Tuple, Any, Type
 from cmath import sqrt
 import skfuzzy as fuzz
@@ -23,8 +12,10 @@ import math
 import numpy as np
 import matplotlib as plt
 
+# for now, let's create a controller which fires at the closest target
 
-class TeamController(KesslerController):
+
+class AbhroController(KesslerController):
     def __init__(self):
         super().__init__()  
         self.eval_frames = 0
@@ -81,6 +72,9 @@ class TeamController(KesslerController):
         rule_turn4 = ctrl.Rule(theta_delta['positive_small'], ship_turn['slight_right'])
         rule_turn5 = ctrl.Rule(theta_delta['positive_large'], ship_turn['moderate_right'])
 
+        # Fuzzy rules for ship_fire (firing requires alignment and proximity)
+        # Fuzzy rules for ship_fire (firing should occur frequently with alignment considerations)
+
         # High-priority firing when alignment and bullet time are ideal
         rule_fire1 = ctrl.Rule(theta_delta['zero'] & bullet_time['short'], ship_fire['fire'])
         rule_fire2 = ctrl.Rule(theta_delta['zero'] & bullet_time['medium'], ship_fire['fire'])
@@ -103,6 +97,8 @@ class TeamController(KesslerController):
 
         # Allow firing for any medium or short bullet time, unless explicitly suppressed
         rule_fire9 = ctrl.Rule((bullet_time['short'] | bullet_time['medium']) & ~theta_delta['positive_large'] & ~theta_delta['negative_large'], ship_fire['fire'])
+
+
 
         # Create the fuzzy control system
         self.targeting_control = ctrl.ControlSystem([
@@ -367,6 +363,20 @@ class TeamController(KesslerController):
         else:
             fire = False
 
+        # get number of nearby asteroids within set distance
+        distance = 120
+        num_nearby_asteroids = self.get_num_nearby_asteroids(ship_state, game_state, distance)
+        mine_control_sim = ctrl.ControlSystemSimulation(self.mine_control, flush_after_run=1)
+        mine_control_sim.input["nearby_asteroids"] = num_nearby_asteroids
+
+        mine_control_sim.compute()
+        print(mine_control_sim.output["place_mine"])
+
+        # if mine_control_sim.output["place_mine"] == -1:
+        #     drop_mine = False
+        # else:
+        #     drop_mine = True
+                
  
         # Thrust System
         num_nearby_asteroids = self.get_num_nearby_asteroids(ship_state, game_state, distance=500)
@@ -405,4 +415,4 @@ class TeamController(KesslerController):
 
     @property
     def name(self) -> str:
-        return "Team 5 Controller"
+        return "Abhro Controller"
