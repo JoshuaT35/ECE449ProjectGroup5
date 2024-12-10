@@ -28,10 +28,20 @@ class TeamController(KesslerController):
     def __init__(self):
         super().__init__()  
         self.eval_frames = 0
-        self.ship_targeting_fuzzy_system()
-        self.ship_mine_fuzzy_system()
-        self.ship_thrust_fuzzy_system()
 
+        # --- variables ---
+        # - max number of nearby asteroids. Theoretically no limit,
+        #       this is just an arbitrarily high value to represent a high number
+        #       of nearby asterouds in the membership function
+        self.num_nearby_asteroids_ceiling = 40
+
+        # - mine cooldown. When it is 0, can deploy a mine. otherwise, the value is reset
+        self.mine_cooldown = 50
+
+        # --- fuzzy systems ---
+        self.ship_perimeter_fuzzy_system()
+        self.ship_targeting_fuzzy_system()
+        self.ship_thrust_fuzzy_system()
 
 
     def ship_targeting_fuzzy_system(self):
@@ -110,34 +120,6 @@ class TeamController(KesslerController):
             rule_fire1, rule_fire2, rule_fire3, rule_fire4, rule_fire5, rule_fire6, rule_fire7, rule_fire8, rule_fire9  # Firing rules
         ])
 
-    
-    def ship_mine_fuzzy_system(self):
-        """
-        handles whether the ship should put a mine down or not
-        """
-        # if there are many asteroids nearby, put down a mine
-        nearby_asteroids = ctrl.Antecedent(np.linspace(0, 8, 1), "nearby_asteroids")
-        place_mine = ctrl.Consequent(np.linspace(-1, 1, 10), "place_mine")
-        
-        # Membership functions for nearby_asteroids
-        nearby_asteroids["low"] = fuzz.trimf(nearby_asteroids.universe, [0, 0, 2])
-        nearby_asteroids["medium"] = fuzz.trimf(nearby_asteroids.universe, [2, 3, 4])
-        nearby_asteroids["high"] = fuzz.trimf(nearby_asteroids.universe, [4, 7, 7])
-
-        # Membership functions for place_mine (binary: -1 = no mine, 1 = place mine)
-        place_mine["no_mine"] = fuzz.trimf(place_mine.universe, [-1, -1, 0.0])
-        place_mine["mine_now"] = fuzz.trimf(place_mine.universe, [0, 1, 1])
-
-        # Define fuzzy rules
-        rule1 = ctrl.Rule(nearby_asteroids["low"], place_mine["no_mine"])
-        rule2 = ctrl.Rule(nearby_asteroids["medium"], place_mine["mine_now"])
-        rule3 = ctrl.Rule(nearby_asteroids["high"], place_mine["mine_now"])
-
-        self.mine_control = ctrl.ControlSystem()
-        self.mine_control.addrule(rule1)
-        self.mine_control.addrule(rule2)
-        self.mine_control.addrule(rule3)
-
 
     def ship_thrust_fuzzy_system(self):
         # Inputs: Distance to asteroid, nearby asteroids, and theta_delta
@@ -202,15 +184,139 @@ class TeamController(KesslerController):
         ])
 
 
+    def ship_perimeter_fuzzy_system(self):
+        # Antecedent: number of nearby asteroids
+        nearby_asteroids = ctrl.Antecedent(np.linspace(0, 25, 25), "nearby_asteroids")
 
+        # Antecedent: distance of closest asteroid
+        closest_asteroid_distance = ctrl.Antecedent(np.linspace(0, 500, 10000), "distance_asteroid")
 
-    # return the number of asteroids within the given distance
-    def get_num_nearby_asteroids(self, ship_state: Dict, game_state: Dict, distance: int):
+        # Antecedent: largest space between nearby asteroids
+        largest_angle = ctrl.Antecedent(np.linspace(0, 180, 180), "largest_angle")
+
+        # Consequent: flight (remain in place), roam, flee
+        movement = ctrl.Consequent(np.linspace(0, 10, 20), "movement")
+
+        # Membership functions for nearby_asteroids (scale of 0 - many asteroids (40 as ceiling))
+        nearby_asteroids["little"] = fuzz.trimf(nearby_asteroids.universe, [0, 0, 6])
+        nearby_asteroids["some"] = fuzz.trimf(nearby_asteroids.universe, [6, 11, 15])
+        nearby_asteroids["many"] = fuzz.trimf(nearby_asteroids.universe, [15, self.num_nearby_asteroids_ceiling, self.num_nearby_asteroids_ceiling])
+
+        # Membership functions for closest asteroid (scale of 0 - 500 pixels)
+        closest_asteroid_distance["very_close"] = fuzz.trimf(closest_asteroid_distance.universe, [0, 0, 100])
+        closest_asteroid_distance["close"] = fuzz.trimf(closest_asteroid_distance.universe, [90, 150, 210])
+        closest_asteroid_distance["middle"] = fuzz.trimf(closest_asteroid_distance.universe, [200, 250, 300])
+        closest_asteroid_distance["far"] = fuzz.trimf(closest_asteroid_distance.universe, [290, 350, 410])
+        closest_asteroid_distance["very_far"] = fuzz.trimf(closest_asteroid_distance.universe, [400, 500, 500])
+
+        # Membership functions for largest space between asteroids (scale of 0 - 180 degrees NOTE: math uses radians)
+        largest_angle["below_60"] = fuzz.trimf(largest_angle.universe, [0, 0, 70])
+        largest_angle["60_to_90"] = fuzz.trimf(largest_angle.universe, [60, 75, 90])
+        largest_angle["above_90"] = fuzz.trimf(largest_angle.universe, [80, 130, 180])
+
+        # Membership functions for running, fighting, roaming (trinary output, 0-2)
+        movement["fight"] = fuzz.trimf(movement.universe, [0, 0, 1])
+        movement["roam"] = fuzz.trimf(movement.universe, [1, 1.5, 2])
+        movement["flee"] = fuzz.trimf(movement.universe, [2, 3, 3])
+
+        # Define fuzzy rules
+
+        # - little or some asteroids nearby
+        # - far or very far
+        # ---
+        # - roam
+        rule1 = ctrl.Rule(
+            (nearby_asteroids["little"] | nearby_asteroids["some"])
+            & (closest_asteroid_distance["far"] | closest_asteroid_distance["very_far"]),
+            movement["roam"]
+        )
+
+        # - little asteroids nearby
+        # - middle or close
+        # ---
+        # - attack
+        rule2 = ctrl.Rule(
+            nearby_asteroids["little"]
+            & (closest_asteroid_distance["close"] | closest_asteroid_distance["middle"]),
+            movement["fight"]
+        )
+
+        # - little asteroids nearby
+        # - very close
+        # ---
+        # - flee
+        rule3 = ctrl.Rule(
+            nearby_asteroids["little"]
+            & closest_asteroid_distance["very_close"],
+            movement["flee"]
+        )
+
+        # - some asteroids nearby
+        # - close/middle distance
+        # - space to flee
+        # ---
+        # - flee
+        rule4 = ctrl.Rule(
+            nearby_asteroids["some"]
+            & (closest_asteroid_distance["close"] | closest_asteroid_distance["middle"])
+            & (largest_angle["60_to_90"] | largest_angle["above_90"]),
+            movement["flee"]
+        )
+
+        # - some asteroids nearby
+        # - very close distance
+        # - no space to flee
+        # ---
+        # - fight
+        rule5 = ctrl.Rule(
+            nearby_asteroids["some"]
+            & (closest_asteroid_distance["close"] | closest_asteroid_distance["middle"])
+            & largest_angle["below_60"],
+            movement["fight"]
+        )
+
+        # - many asteroids nearby
+        # - space to flee
+        # ---
+        # - flee
+        rule6 = ctrl.Rule(
+            nearby_asteroids["many"]
+            & (largest_angle["60_to_90"] | largest_angle["above_90"]),
+            movement["flee"]
+        )
+
+        # - many asteroids nearby
+        # - no space to flee
+        # ---
+        # - fight
+        rule7 = ctrl.Rule(
+            nearby_asteroids["many"]
+            & (largest_angle["below_60"]),
+            movement["fight"]
+        )
+
+        # create the control system
+        self.ship_perimeter_situation = ctrl.ControlSystem()
+        self.ship_perimeter_situation.addrule(rule1)
+        self.ship_perimeter_situation.addrule(rule2)
+        self.ship_perimeter_situation.addrule(rule3)
+        self.ship_perimeter_situation.addrule(rule4)
+        self.ship_perimeter_situation.addrule(rule5)
+        self.ship_perimeter_situation.addrule(rule6)
+        self.ship_perimeter_situation.addrule(rule7)
+        
+
+    def reset_mine_cooldown(self):
+        self.mine_cooldown = 60
+
+    # return list of nearby asteroids and their count
+    def get_nearby_asteroids(self, ship_state: Dict, game_state: Dict, distance: int):
         # x and y coordinates of ship
         ship_pos_x = ship_state["position"][0]
         ship_pos_y = ship_state["position"][1]
 
         # default values
+        list_asteroids = []
         num_asteroids = 0
 
         # loop through asteroids
@@ -226,11 +332,12 @@ class TeamController(KesslerController):
             # c = curr_dist
             curr_dist = math.sqrt((ship_pos_x - asteroid_pos_x)**2 + (ship_pos_y - asteroid_pos_y)**2)
 
-            # if current distance is in given distance, increase number by 1
+            # if current distance is in given distance, increase number by 1 and add asteroid to list
             if (curr_dist <= distance):
+                list_asteroids.append(asteroid)
                 num_asteroids += 1
         
-        return num_asteroids
+        return list_asteroids, num_asteroids
 
 
     # return asteroid and its distance if it exists, otherwise None and -1
@@ -344,13 +451,117 @@ class TeamController(KesslerController):
         return bullet_t, shooting_theta
 
 
+        # given 2 asteroids, find the angle created between the 2 asteroids and the ship, and the unit vector
+    
+
+    # given 2 asteroids, find the angle created between the 2 asteroids and the ship, and the unit vector inbetween
+    def get_ship_2_asteroids_angle_direction(self, ship_state: Dict, asteroid1: Dict, asteroid2: Dict):
+        # x and y coordinates of ship
+        ship_pos_x = ship_state["position"][0]
+        ship_pos_y = ship_state["position"][1]
+
+        # x and y coordinates of asteroid1
+        asteroid1_pos_x = asteroid1["position"][0]
+        asteroid1_pos_y = asteroid1["position"][1]
+
+        # x and y coordinates of asteroid
+        asteroid2_pos_x = asteroid2["position"][0]
+        asteroid2_pos_y = asteroid2["position"][1]
+
+        # get magnitude of distance squared and magnitude of distance from ship to first asteroid
+        dx_ship_to_a1 = asteroid1_pos_x - ship_pos_x
+        dy_ship_to_a1 = asteroid1_pos_y - ship_pos_y
+        d_ship_to_a1_square = math.pow(dx_ship_to_a1, 2) + math.pow(dy_ship_to_a1, 2)
+        d_ship_to_a1 = math.sqrt(d_ship_to_a1_square)
+
+        # get magnitude of distance squared and magnitude of distance from ship to second asteroid
+        dx_ship_to_a2 = asteroid2_pos_x - ship_pos_x
+        dy_ship_to_a2 = asteroid2_pos_y - ship_pos_y
+        d_ship_to_a2_square = math.pow(dx_ship_to_a2, 2) + math.pow(dy_ship_to_a2, 2)
+        d_ship_to_a2 = math.sqrt(d_ship_to_a2_square)
+
+        # get magnitude of distance squared between the 2 asteroids
+        dx_a1_a2 = asteroid1_pos_x - asteroid2_pos_x
+        dy_a1_a2 = asteroid1_pos_y - asteroid2_pos_y
+        d_a1_to_a2_square = math.pow(dx_a1_a2, 2) + math.pow(dy_a1_a2, 2)
+
+        # law of cosines to find theta (the absolution of values means we do not have direction)
+        # clamp value
+        try:
+            angle_theta_magnitude = math.acos(
+                (d_ship_to_a1_square + d_ship_to_a2_square - d_a1_to_a2_square) / (2*d_ship_to_a1*d_ship_to_a2)
+            )
+        except:
+            angle_theta_magnitude = 0
+
+        # get distance unit vector v1 (ship to asteroid 1)
+        # unit_v1 = magnitude(dx_ship_a1.i + dy_ship_a1.j)/magnitude
+        # unit_v1_distance = tuple(dx_ship_to_a1/d_ship_to_a1, dy_ship_to_a1/d_ship_to_a1)
+
+        # get distance unit vector v2 (ship to asteroid 2)
+        # unit_v2 = magnitude(dx_ship_a2.i + dy_ship_a2.j)/magnitude
+        # unit_v2_distance = tuple(dx_ship_to_a2/d_ship_to_a2, dy_ship_to_a2/d_ship_to_a2)
+
+        # get distance unit vector v3 between v1 and v2
+        unit_v3_x = (dx_ship_to_a1/d_ship_to_a1) + (dx_ship_to_a2/d_ship_to_a2)
+        unit_v3_y = (dx_ship_to_a2/d_ship_to_a2) + (dx_ship_to_a2/d_ship_to_a2)
+        unit_v3 = (unit_v3_x, unit_v3_y)
+
+        return angle_theta_magnitude, unit_v3
+    
+
+    # given a list of asteroids, find the biggest theta between them
+    def get_largest_ship_2_asteroids_angle_direction(self, ship_state: Dict, asteroids_list: list):
+        max_theta_radians = 0
+        best_unit_v3 = None
+
+        # if at least 2 asteroids, find the best theta and unitv3 between them
+        if len(asteroids_list) > 3:
+            for asteroid1 in asteroids_list:
+                for asteroid2 in asteroids_list:
+                    theta, unit_v3 = self.get_ship_2_asteroids_angle_direction(ship_state, asteroid1, asteroid2)
+                    if (theta > max_theta_radians):
+                        max_theta_radians = theta
+                        best_unit_v3 = unit_v3
+        
+        return max_theta_radians, best_unit_v3
+
 
     # what does the ship do every time
     def actions(self, ship_state: Dict, game_state: Dict) -> Tuple[float, float, bool, bool]:
+
+        # --- take stock of perimeter ---
+            # - number of asteroids nearby
+        list_nearby_asteroids, num_nearby_asteroids = self.get_nearby_asteroids(ship_state, game_state, distance=500)
+
+            # - distance of closest asteroid
+        closest_asteroid, distance_to_asteroid = self.find_closest_asteroid(ship_state, game_state)
+
+            # - if there are 2 or more asteroids, largest space is calculated, else 0
+        if (num_nearby_asteroids > 2):
+            # get the best theta and unitv3 pair
+            theta_radians, unit_v3 = self.get_largest_ship_2_asteroids_angle_direction(ship_state, list_nearby_asteroids)
+        else:
+            theta_radians = 0
+            unit_v3 = (0, 0)
+        
+        # -- from perimeter, choose what to do (fight, roam, flee) ---
+        perimeter_simulation = ctrl.ControlSystemSimulation(self.ship_perimeter_situation, flush_after_run=1)
+
+        # # pas inputs into it and receive recommendation
+        perimeter_simulation.input["nearby_asteroids"] = num_nearby_asteroids
+        perimeter_simulation.input["distance_asteroid"] = distance_to_asteroid
+        perimeter_simulation.input["largest_angle"] = theta_radians
+        perimeter_simulation.compute()
+
+        # --- we need to fight (shoot or mine) ---
+        # if perimeter_simulation.output["movement"] <= 1:
+        # print(perimeter_simulation.output["movement"])
+
+        # --- targeting fuzzy system ---
         # get bullet_t and shooting_theta inputs for ship_targeting_fuzzy_system, as well as distance to asteroid
         bullet_t, shooting_theta = self.get_bullet_t_shooting_theta(ship_state, game_state)
-        closest_asteroid, distance_to_asteroid = self.find_closest_asteroid(ship_state, game_state)
-        
+
         # create control system simulation for ship_targeting_fuzzy_system
         # pass the inputs to the rulebase and fire it
         shooting = ctrl.ControlSystemSimulation(self.targeting_control, flush_after_run=1)
@@ -361,20 +572,37 @@ class TeamController(KesslerController):
 
         # Get the defuzzified outputs for ship_targeting_fuzzy_system
         turn_rate = shooting.output['ship_turn']
-        
-        if shooting.output['ship_fire'] >= 0:
-            fire = True
-        else:
-            fire = False
 
- 
+        # --- choose to fire or place a mine ---
+        # if too many asteroids nearby (adjustable), and we are not on cooldown, place a mine
+        if (num_nearby_asteroids >= 7) and self.mine_cooldown == 0:
+            drop_mine = True
+            # reset cooldown
+            self.reset_mine_cooldown()
+
+            # do not fire
+            fire = False
+        else:
+            # else fire
+            if shooting.output['ship_fire'] >= 0:
+                fire = True
+            else:
+                fire = False
+            
+            # decrement mine cooldown
+            drop_mine = False
+            if (self.mine_cooldown > 0):
+                self.mine_cooldown -= 1
+
+
+        # --- use this all the time --- 
         # Thrust System
-        num_nearby_asteroids = self.get_num_nearby_asteroids(ship_state, game_state, distance=500)
+        list_nearby_asteroids, num_nearby_asteroids = self.get_nearby_asteroids(ship_state, game_state, distance=500)
 
         # Debug logs for observation
-        print(f"DEBUG - Closest asteroid distance: {distance_to_asteroid}")
-        print(f"DEBUG - Nearby asteroids count: {num_nearby_asteroids}")
-        print(f"DEBUG - Theta Delta: {shooting_theta}")
+        # print(f"DEBUG - Closest asteroid distance: {distance_to_asteroid}")
+        # print(f"DEBUG - Nearby asteroids count: {num_nearby_asteroids}")
+        # print(f"DEBUG - Theta Delta: {shooting_theta}")
 
         # Thrust system simulation
         thrust_sim = ctrl.ControlSystemSimulation(self.thrust_control)
@@ -388,17 +616,16 @@ class TeamController(KesslerController):
         try:
             thrust_sim.compute()
             thrust = thrust_sim.output["thrust"]
-            print(f"DEBUG - Computed Thrust: {thrust}")
-        except KeyError:
-            print("KeyError: 'thrust' not computed. Check inputs or rules.")
+            # print(f"DEBUG - Computed Thrust: {thrust}")
+        except:
+            # print("KeyError: 'thrust' not computed. Check inputs or rules.")
             thrust = 0.0
 
-        drop_mine = False
-        
+        # --- other stuff to do ---
         self.eval_frames +=1
         
         #DEBUG
-        print(f"thrust: {thrust}, turn_rate: {turn_rate}, fire: {fire}")
+        # print(f"thrust: {thrust}, turn_rate: {turn_rate}, fire: {fire}")
         
         return thrust, turn_rate, fire, drop_mine
 

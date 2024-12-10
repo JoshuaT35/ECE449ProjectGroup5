@@ -7,7 +7,6 @@ import time
 
 from kesslergame import Scenario, KesslerGame, GraphicsType
 from test_controller import TestController
-from scott_dick_controller import ScottDickController
 from team_controller import TeamController
 from graphics_both import GraphicsBoth
 
@@ -16,7 +15,6 @@ my_test_scenario = Scenario(name='Test Scenario',
                             num_asteroids=10,
                             ship_states=[
                                 {'position': (400, 400), 'angle': 90, 'lives': 3, 'team': 1, "mines_remaining": 3},
-                                {'position': (400, 600), 'angle': 90, 'lives': 3, 'team': 2, "mines_remaining": 3},
                                 {'position': (600, 400), 'angle': 90, 'lives': 3, 'team': 3, "mines_remaining": 3}, 
                             ],
                             map_size=(1000, 800),
@@ -38,8 +36,7 @@ game = KesslerGame(settings=game_settings)  # Use this to visualize the game sce
 pre = time.perf_counter()
 score, perf_data = game.run(scenario=my_test_scenario, controllers=[
     TestController(),
-    ScottDickController(),
-    TeamController(),
+    TeamController()
     ])
 
 # Print out some general info about the result
